@@ -136,36 +136,36 @@ class DSAFNet(nn.Module):
 # ===== Optimized Data Loader Class =====
 class TrainWindowDataset(Dataset):
     def __init__(self, data, weather, period, in_len, out_len, indices):
-        # Pre-compute all samples to avoid repeated computation during training
-        self.samples = []
+        # Store data references and compute on-the-fly for better memory efficiency
+        self.data = data
+        self.weather = weather
         self.period = period
+        self.in_len = in_len
+        self.out_len = out_len
+        self.indices = indices
         
-        print(f"Pre-computing {len(indices)} training samples...")
-        for idx in indices:
-            s = idx
-            x = data[:, s:s + in_len, :]              # (N, L_in, F)
-            y = data[:, s + in_len:s + in_len + out_len, :]  # (N, L_out, F)
-            w = weather[:, s:s + in_len]              # (N, L_in)
-
-            ti = (np.arange(s, s + in_len) % period) * np.ones([1, in_len]) / (period - 1)
-            to = (np.arange(s + in_len, s + in_len + out_len) % period) * np.ones([1, out_len]) / (period - 1)
-
-            # Convert to tensors once and store
-            x = torch.tensor(x, dtype=torch.float32).permute(2, 0, 1)  # (F, N, L_in)
-            y = torch.tensor(y, dtype=torch.float32).permute(2, 0, 1)  # (F, N, L_out)
-            w = torch.tensor(w, dtype=torch.long)                      # (N, L_in)
-            ti = torch.tensor(ti, dtype=torch.float32)                 # (1, L_in)
-            to = torch.tensor(to, dtype=torch.float32)                 # (1, L_out)
-            
-            self.samples.append((x, y, ti, to, w))
-        
-        print(f"Pre-computation completed. {len(self.samples)} samples ready.")
+        print(f"Dataset initialized with {len(indices)} training samples.")
 
     def __len__(self):
-        return len(self.samples)
+        return len(self.indices)
 
     def __getitem__(self, idx):
-        return self.samples[idx]
+        s = self.indices[idx]
+        x = self.data[:, s:s + self.in_len, :]              # (N, L_in, F)
+        y = self.data[:, s + self.in_len:s + self.in_len + self.out_len, :]  # (N, L_out, F)
+        w = self.weather[:, s:s + self.in_len]              # (N, L_in)
+
+        ti = (np.arange(s, s + self.in_len) % self.period) * np.ones([1, self.in_len]) / (self.period - 1)
+        to = (np.arange(s + self.in_len, s + self.in_len + self.out_len) % self.period) * np.ones([1, self.out_len]) / (self.period - 1)
+
+        # Convert to tensors (will be moved to GPU in training loop)
+        x = torch.tensor(x, dtype=torch.float32).permute(2, 0, 1)  # (F, N, L_in)
+        y = torch.tensor(y, dtype=torch.float32).permute(2, 0, 1)  # (F, N, L_out)
+        w = torch.tensor(w, dtype=torch.long)                      # (N, L_in)
+        ti = torch.tensor(ti, dtype=torch.float32)                 # (1, L_in)
+        to = torch.tensor(to, dtype=torch.float32)                 # (1, L_out)
+        
+        return x, y, ti, to, w
 
 # ===== Training Time Estimator =====
 class TrainingTimeEstimator:
@@ -301,7 +301,7 @@ def main():
     parser.add_argument('--episode',type=int,default=25,help='training episodes')
     parser.add_argument('--period',type=int,default=36,help='periodic for temporal embedding')
     parser.add_argument('--hidden_dim', type=int, default=64, help='hidden dimension for DSAFNet')
-    parser.add_argument('--num_workers', type=int, default=8, help='number of data loader workers')
+    parser.add_argument('--num_workers', type=int, default=4, help='number of data loader workers')
     parser.add_argument('--val_frequency', type=int, default=5, help='validate every N epochs')
     
     # === NEW: DP hyperparameters ===
@@ -392,6 +392,7 @@ def main():
         indices=train_indices
     )
     print(f"Dataset creation completed in {time.time() - start_time:.2f} seconds")
+    print(f"📊 Dataset will generate samples on-the-fly for better GPU utilization")
 
     if args.dp:
         sample_rate = args.batch / len(dataset)
@@ -441,15 +442,10 @@ def main():
         privacy_engine = None
         csv_filename = 'dsafnet_training_no_dp.csv'
 
-    # Validation data preparation (optimized)
+    # Validation data preparation
     print("Preparing validation data...")
     start_time = time.time()
     val_index = list(range(val_data.shape[1] - (args.in_len + args.out_len)))
-    
-    # Subsample validation data for faster validation
-    if len(val_index) > 1000:
-        print(f"Large validation set detected ({len(val_index)} samples). Subsampling to 1000 for faster validation.")
-        val_index = val_index[::len(val_index)//1000][:1000]
     
     label = []
     for i in range(len(val_index)):
@@ -460,6 +456,12 @@ def main():
     print("start training...", flush=True)
     print("\n" + "="*60)
     print("🚀 TRAINING LOOP STARTED")
+    print("="*60)
+    
+    # GPU Memory Check
+    if device.type == 'cuda':
+        print(f"💾 GPU Memory before training: {torch.cuda.memory_allocated(device)/1024**2:.1f} MB")
+        print(f"💾 GPU Memory reserved: {torch.cuda.memory_reserved(device)/1024**2:.1f} MB")
     print("="*60)
 
     # Initialize CSV file for logging training metrics
@@ -505,12 +507,12 @@ def main():
         for batch_idx, batch in enumerate(train_loader):
             trainx, trainy, trainti, trainto, trainw = batch
             
-            # Move to device
-            trainx = trainx.to(device, non_blocking=False)
-            trainy = trainy.to(device, non_blocking=False)
-            trainti = trainti.to(device, non_blocking=False)
-            trainto = trainto.to(device, non_blocking=False)
-            trainw = trainw.to(device, non_blocking=False)
+            # Move to device with non_blocking for better GPU utilization
+            trainx = trainx.to(device, non_blocking=True)
+            trainy = trainy.to(device, non_blocking=True)
+            trainti = trainti.to(device, non_blocking=True)
+            trainto = trainto.to(device, non_blocking=True)
+            trainw = trainw.to(device, non_blocking=True)
 
             if trainx.dim() == 3:
                 trainx = trainx.unsqueeze(0)
@@ -548,6 +550,14 @@ def main():
             # Accumulate training loss for this epoch
             epoch_training_loss += loss.item()
             num_batches += 1
+            
+            # Show GPU utilization after first batch
+            if ep == 1 and batch_idx == 0 and device.type == 'cuda':
+                print(f"\n✅ GPU UTILIZATION CONFIRMED:")
+                print(f"   GPU Memory allocated: {torch.cuda.memory_allocated(device)/1024**2:.1f} MB")
+                print(f"   GPU Memory cached: {torch.cuda.memory_reserved(device)/1024**2:.1f} MB")
+                print(f"   Tensors on GPU: trainx={trainx.is_cuda}, output={output.is_cuda}")
+                print("="*60 + "\n")
 
         # Validation phase
         model.eval()

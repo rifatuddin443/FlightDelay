@@ -15,7 +15,7 @@ epoch,training_loss,validation_loss,validation_mae,validation_r2,validation_rmse
 # episode,25
 # period,36
 # hidden_dim,64
-# num_workers,8
+# num_workers,4
 # val_frequency,5
 # dp,False
 # target_epsilon,1.0
@@ -25,3 +25,4 @@ epoch,training_loss,validation_loss,validation_mae,validation_r2,validation_rmse
 # output_dir,./results
 # Start of Training Data
 epoch,training_loss,validation_loss,validation_mae,validation_r2,validation_rmse,epsilon
+1,0.9021497229827252,0.8976489918135288,7.245462292137361,0.06097282373054949,9.496172136856417,No DP

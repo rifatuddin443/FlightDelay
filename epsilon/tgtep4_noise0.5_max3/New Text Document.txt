@@ -1,0 +1,57 @@
+Epoch 001 | Loss 1.0494 | Val MAE 60.8672 R2 -102.7997 RMSE 89.9873
+[Checkpoint] New minimum MAE 60.8672 at epoch 1, model saved.
+D:\python\STPN-main\dptrainsave2.py:272: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\torch\csrc\autograd\generated\python_variable_methods.cpp:836.)
+  log_row = {'epoch': ep, 'loss': float(loss), 'mae': mean_mae, 'r2': mean_r2, 'rmse': mean_rmse}
+Epoch 002 | Loss 0.9265 | Val MAE 18.8896 R2 -6.1498 RMSE 23.6172
+[Checkpoint] New minimum MAE 18.8896 at epoch 2, model saved.
+Epoch 003 | Loss 0.9098 | Val MAE 47.0486 R2 -45.5701 RMSE 60.2749
+Epoch 004 | Loss 0.9000 | Val MAE 13.9640 R2 -2.5116 RMSE 16.5515
+[Checkpoint] New minimum MAE 13.9640 at epoch 4, model saved.
+Epoch 005 | Loss 431.4799 | Val MAE 124.1970 R2 -253.3891 RMSE 140.8745
+Epoch 006 | Loss 3.7363 | Val MAE 14.7691 R2 -4.2310 RMSE 20.2010
+Epoch 007 | Loss 1.6345 | Val MAE 10.7835 R2 -1.8725 RMSE 14.9696
+[Checkpoint] New minimum MAE 10.7835 at epoch 7, model saved.
+Epoch 008 | Loss 0.9365 | Val MAE 198.8902 R2 -650.1952 RMSE 225.3921
+Epoch 009 | Loss 7.9144 | Val MAE 174.7214 R2 -550.4098 RMSE 207.4055
+Epoch 010 | Loss 1.0914 | Val MAE 166.6486 R2 -423.9377 RMSE 182.0731
+Epoch 011 | Loss 2.1663 | Val MAE 205.4276 R2 -813.6208 RMSE 252.0930
+Epoch 012 | Loss 0.8823 | Val MAE 236.0999 R2 -914.0241 RMSE 267.1772
+Epoch 013 | Loss 0.9134 | Val MAE 122.1231 R2 -384.5454 RMSE 173.4286
+Epoch 014 | Loss 0.8514 | Val MAE 523.2380 R2 -5707.5355 RMSE 667.3373
+Epoch 015 | Loss 0.8802 | Val MAE 357.6201 R2 -2335.2844 RMSE 426.9194
+Epoch 016 | Loss 0.8657 | Val MAE 336.3332 R2 -2018.0403 RMSE 396.8766
+Epoch 017 | Loss 0.8598 | Val MAE 340.5104 R2 -2135.9793 RMSE 408.3036
+Epoch 018 | Loss 0.8948 | Val MAE 321.2039 R2 -2235.0934 RMSE 417.6649
+Epoch 019 | Loss 0.8590 | Val MAE 178.4842 R2 -819.6886 RMSE 253.0301
+Epoch 020 | Loss 0.8587 | Val MAE 72.3737 R2 -258.8611 RMSE 142.3814
+Epoch 021 | Loss 0.8326 | Val MAE 70.8494 R2 -1158.2054 RMSE 300.7207
+Epoch 022 | Loss 0.8894 | Val MAE 41.2693 R2 -44.7550 RMSE 59.7451
+Epoch 023 | Loss 0.8365 | Val MAE 57.5328 R2 -1010.6465 RMSE 280.9296
+Epoch 024 | Loss 0.8420 | Val MAE 77.4021 R2 -2312.3497 RMSE 424.8188
+Epoch 025 | Loss 0.8919 | Val MAE 95.4430 R2 -4025.6643 RMSE 560.4744
+Epoch 026 | Loss 0.8711 | Val MAE 149.9808 R2 -5442.1604 RMSE 651.6414
+Epoch 027 | Loss 0.8951 | Val MAE 176.6398 R2 -4147.4601 RMSE 568.8877
+Epoch 028 | Loss 0.8394 | Val MAE 171.8225 R2 -1642.9946 RMSE 358.1238
+Epoch 029 | Loss 0.8539 | Val MAE 157.7615 R2 -3393.8230 RMSE 514.6259
+Epoch 030 | Loss 0.8456 | Val MAE 406.1915 R2 -6810.9925 RMSE 728.9876
+Epoch 031 | Loss 0.8788 | Val MAE 598.6540 R2 -14028.8448 RMSE 1046.1875        
+Epoch 032 | Loss 0.8623 | Val MAE 375.3544 R2 -8719.5677 RMSE 824.8129
+Epoch 033 | Loss 0.8671 | Val MAE 747.0161 R2 -19238.5693 RMSE 1225.1260        
+Epoch 034 | Loss 0.8078 | Val MAE 300.7771 R2 -7382.4801 RMSE 758.9508
+Epoch 035 | Loss 0.8909 | Val MAE 417.4731 R2 -12198.3845 RMSE 975.5557
+Epoch 036 | Loss 0.8367 | Val MAE 771.2622 R2 -39924.9956 RMSE 1764.8629        
+Epoch 037 | Loss 0.8439 | Val MAE 516.2798 R2 -9529.0194 RMSE 862.2436
+Epoch 038 | Loss 0.8434 | Val MAE 630.3859 R2 -16337.1795 RMSE 1128.9765        
+Epoch 039 | Loss 0.8389 | Val MAE 687.4874 R2 -28344.9854 RMSE 1487.0613        
+Epoch 040 | Loss 0.8549 | Val MAE 602.1805 R2 -24439.0033 RMSE 1380.8093        
+Epoch 041 | Loss 0.8445 | Val MAE 556.9616 R2 -15443.5655 RMSE 1097.6678        
+Epoch 042 | Loss 0.8637 | Val MAE 362.6977 R2 -11272.6437 RMSE 937.8108
+Epoch 043 | Loss 0.8292 | Val MAE 169.9248 R2 -2102.2892 RMSE 405.0723
+Epoch 044 | Loss 0.8348 | Val MAE 282.5448 R2 -4280.5190 RMSE 577.9390
+Epoch 045 | Loss 0.8454 | Val MAE 337.9177 R2 -6762.4026 RMSE 726.3831
+Epoch 046 | Loss 0.8463 | Val MAE 347.6510 R2 -6013.9996 RMSE 685.0162
+Epoch 047 | Loss 0.8633 | Val MAE 340.2003 R2 -4158.6450 RMSE 569.6541
+Epoch 048 | Loss 0.8303 | Val MAE 436.9206 R2 -6202.9983 RMSE 695.6951
+Epoch 049 | Loss 0.8692 | Val MAE 572.4014 R2 -7490.1060 RMSE 764.4623
+Epoch 050 | Loss 0.8502 | Val MAE 670.5350 R2 -15634.7421 RMSE 1104.4405 

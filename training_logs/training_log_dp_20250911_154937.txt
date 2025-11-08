@@ -1,0 +1,14 @@
+=== Training Configuration ===
+Model parameters: 94140
+Learning rate: 0.001
+Batch size: 32
+
+=== Differential Privacy Configuration ===
+Target epsilon: 3.0
+Target delta: 1e-05
+Max gradient norm: 2.0
+Noise multiplier: 0.6494140625
+Adaptive clipping: False
+Sparse-aware noise: False
+
+Starting training...

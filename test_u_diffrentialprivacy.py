@@ -1,0 +1,164 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Jul 13 13:40:49 2022
+
+@author: AA
+"""
+
+import torch
+from model import STPN
+import util
+import numpy as np
+import argparse
+import torch.nn as nn
+from baseline_methods import test_error, StandardScaler
+from training_u_diffrentialprivacy import SpatioTemporalCNN
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--device', type=str, default='cpu', help='')
+parser.add_argument('--data', type=str, default='US', help='data type')
+parser.add_argument("--train_val_ratio", nargs="+", default=[0.7, 0.1], help='train/test/val ratio', type=float)
+parser.add_argument('--in_len', type=int, default=12, help='input time series length')
+parser.add_argument('--out_len', type=int, default=12, help='output time series length')
+parser.add_argument('--period', type=int, default=36, help='periodic for temporal embedding')
+
+# 🔹 Add model architecture arguments (must match training_u.py)
+parser.add_argument('--h_layers', type=int, default=2, help='number of STPN hidden layers')
+parser.add_argument('--in_channels', type=int, default=2, help='number of input channels')
+parser.add_argument('--hidden_channels', type=int,nargs='+', default=[128,64,32], help='hidden channel size')
+parser.add_argument('--out_channels', type=int, default=2, help='number of output channels')
+parser.add_argument('--emb_size', type=int, default=16, help='temporal embedding size')
+parser.add_argument('--dropout',type=float,default=0.3,help='dropout rate')
+
+args = parser.parse_args()
+class SimpleCNN(nn.Module):
+    def __init__(self, in_channels=2, out_channels=2):
+        super(SimpleCNN, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels, 16, kernel_size=3, padding=1)
+        self.relu = nn.ReLU()
+        self.conv2 = nn.Conv2d(16, out_channels, kernel_size=3, padding=1)
+
+    def forward(self, x, ti=None, supports=None, to=None, w=None):
+        # Ignore additional args for this test model
+        x = self.conv1(x)
+        x = self.relu(x)
+        x = self.conv2(x)
+        return x
+def main():
+    device = torch.device(args.device)
+    adj, training_data, val_data, test_data, training_w, val_w, test_w = util.load_data(args.data)
+    supports = [torch.tensor(i).to(device) for i in adj]
+    scaler = StandardScaler(training_data[~np.isnan(training_data)].mean(),
+                            training_data[~np.isnan(training_data)].std())
+    test_index = list(range(test_data.shape[1] - (args.in_len + args.out_len)))
+    label = []
+    for i in range(len(test_index)):
+        label.append(np.expand_dims(
+            test_data[:, test_index[i] + args.in_len:test_index[i] + args.in_len + args.out_len, :],
+            axis=0))
+    label = np.concatenate(label)
+
+    # 🔹 Recreate model and load state_dict
+    # Try to match the saved model architecture
+    # The error indicates the saved model expects 32 input channels
+    # Let's first try to load the state dict to understand the architecture
+    state_dict = torch.load("spdpnUS.pth", map_location=device)
+    
+    # Check the first conv layer weights to understand input channels
+    first_conv_key = None
+    for key in state_dict.keys():
+        if 'conv' in key.lower() and 'weight' in key:
+            first_conv_key = key
+            break
+    
+    if first_conv_key:
+        first_conv_weight = state_dict[first_conv_key]
+        actual_in_channels = first_conv_weight.shape[1]  # Input channels
+        print(f"Detected input channels from saved model: {actual_in_channels}")
+        print(f"First conv layer shape: {first_conv_weight.shape}")
+    else:
+        actual_in_channels = args.in_channels
+        print(f"Could not detect input channels, using default: {actual_in_channels}")
+
+    model = SpatioTemporalCNN(
+            in_channels=actual_in_channels,
+            out_channels=args.out_channels,
+            hidden_channels=args.hidden_channels,
+            in_len=args.in_len,
+            out_len=args.out_len,
+            dropout=args.dropout
+        ).to(device)             
+    
+    # model = SimpleCNN(in_channels=args.in_channels, out_channels=args.out_channels).to(device)
+    model.load_state_dict(state_dict, strict=False)
+    model.eval()
+
+    print(f"Model input channels: {actual_in_channels}")
+    print(f"Test data shape: {test_data.shape}")
+    
+    outputs = []
+    for i in range(len(test_index)):
+        testx = np.expand_dims(test_data[:, test_index[i]: test_index[i] + args.in_len, :], axis=0)
+        testx = scaler.transform(testx)
+        testw = np.expand_dims(test_w[:, test_index[i]: test_index[i] + args.in_len], axis=0)
+        testw = torch.LongTensor(testw).to(device)
+        testx[np.isnan(testx)] = 0
+        testti = (np.arange(int(training_data.shape[1] + val_data.shape[1]) + test_index[i],
+                            int(training_data.shape[1] + val_data.shape[1]) + test_index[i] + args.in_len)
+                  % args.period) * np.ones([1, args.in_len]) / (args.period - 1)
+        testto = (np.arange(int(training_data.shape[1] + val_data.shape[1]) + test_index[i] + args.in_len,
+                            int(training_data.shape[1] + val_data.shape[1]) + test_index[i] + args.in_len + args.out_len)
+                  % args.period) * np.ones([1, args.out_len]) / (args.period - 1)
+        testx = torch.Tensor(testx).to(device)
+        testx = testx.permute(0, 3, 1, 2)  # Shape: (batch, features, nodes, time)
+        
+        # Adjust input channels if needed
+        current_channels = testx.shape[1]
+        if current_channels != actual_in_channels:
+            if actual_in_channels > current_channels:
+                # Pad with zeros or duplicate channels
+                padding_channels = actual_in_channels - current_channels
+                padding = torch.zeros(testx.shape[0], padding_channels, testx.shape[2], testx.shape[3], device=device)
+                testx = torch.cat([testx, padding], dim=1)
+                print(f"Padded input from {current_channels} to {actual_in_channels} channels")
+            else:
+                # Truncate channels
+                testx = testx[:, :actual_in_channels, :, :]
+                print(f"Truncated input from {current_channels} to {actual_in_channels} channels")
+        
+        testti = torch.Tensor(testti).to(device)
+        testto = torch.Tensor(testto).to(device)
+        output = model(testx, testti, supports, testto, testw)
+        output = output.permute(0, 2, 3, 1)
+        output = output.detach().cpu().numpy()
+        output = scaler.inverse_transform(output)
+        outputs.append(output)
+    yhat = np.concatenate(outputs)
+
+    log = '3 step ahead arrival delay, Test MAE: {:.4f} min, Test R2: {:.4f}, Test RMSE: {:.4f} min'
+    MAE, RMSE, R2 = test_error(yhat[:, :, 2, 0], label[:, :, 2, 0])
+    print(log.format(MAE, R2, RMSE))
+
+    log = '6 step ahead arrival delay, Test MAE: {:.4f} min, Test R2: {:.4f}, Test RMSE: {:.4f} min'
+    MAE, RMSE, R2 = test_error(yhat[:, :, 5, 0], label[:, :, 5, 0])
+    print(log.format(MAE, R2, RMSE))
+
+    log = '12 step ahead arrival delay, Test MAE: {:.4f} min, Test R2: {:.4f}, Test RMSE: {:.4f} min'
+    MAE, RMSE, R2 = test_error(yhat[:, :, 11, 0], label[:, :, 11, 0])
+    print(log.format(MAE, R2, RMSE))
+
+    log = '3 step ahead departure delay, Test MAE: {:.4f} min, Test R2: {:.4f}, Test RMSE: {:.4f} min'
+    MAE, RMSE, R2 = test_error(yhat[:, :, 2, 1], label[:, :, 2, 1])
+    print(log.format(MAE, R2, RMSE))
+
+    log = '6 step ahead departure delay, Test MAE: {:.4f} min, Test R2: {:.4f}, Test RMSE: {:.4f} min'
+    MAE, RMSE, R2 = test_error(yhat[:, :, 5, 1], label[:, :, 5, 1])
+    print(log.format(MAE, R2, RMSE))
+
+    log = '12 step ahead departure delay, Test MAE: {:.4f} min, Test R2: {:.4f}, Test RMSE: {:.4f} min'
+    MAE, RMSE, R2 = test_error(yhat[:, :, 11, 1], label[:, :, 11, 1])
+    print(log.format(MAE, R2, RMSE))
+
+
+if __name__ == "__main__":
+    main()

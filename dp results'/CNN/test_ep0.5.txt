@@ -1,0 +1,6 @@
+3 step ahead arrival delay, Test MAE: 9.7916 min, Test R2: -0.0659, Test RMSE: 12.4818 min
+6 step ahead arrival delay, Test MAE: 9.7918 min, Test R2: -0.0659, Test RMSE: 12.4821 min
+12 step ahead arrival delay, Test MAE: 9.7249 min, Test R2: -0.0552, Test RMSE: 12.4228 min
+3 step ahead departure delay, Test MAE: 6.6391 min, Test R2: -0.1648, Test RMSE: 9.6516 min
+6 step ahead departure delay, Test MAE: 6.6407 min, Test R2: -0.1648, Test RMSE: 9.6535 min
+12 step ahead departure delay, Test MAE: 6.5098 min, Test R2: -0.0871, Test RMSE: 9.3282 min

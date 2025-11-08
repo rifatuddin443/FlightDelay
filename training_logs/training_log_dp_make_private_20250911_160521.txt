@@ -1,0 +1,18 @@
+=== Training Configuration ===
+Original model parameters: 94140
+=== Model Compatibility Check ===
+Found 4 compatibility issues:
+Applying automatic fixes...
+Model automatically fixed for DP compatibility
+Model is now fully compatible with differential privacy
+Fixed model parameters: 94140
+=== Differential Privacy Enabled ===
+DP Method: make_private
+Noise multiplier: 1.1
+Max gradient norm: 1.0
+Delta: 1e-05
+Learning rate: 0.001
+Batch size: 32
+Differential Privacy: Enabled (make_private)
+start training...
+Using make_private with noise_multiplier=1.1

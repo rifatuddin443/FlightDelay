@@ -1,0 +1,5 @@
+=== Training Configuration ===
+Model parameters: 94140
+Learning rate: 0.001
+Batch size: 32
+start training...

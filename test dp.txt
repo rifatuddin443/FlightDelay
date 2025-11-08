@@ -1,0 +1,81 @@
+e=2, spdpnUS_ep7_MAE5.6690.pth
+3 step ahead arrival delay, Test MAE: 9.2492 min, Test R2: -0.0359, Test RMSE: 12.3047 min
+6 step ahead arrival delay, Test MAE: 9.2444 min, Test R2: -0.0341, Test RMSE: 12.2947 min
+12 step ahead arrival delay, Test MAE: 9.2394 min, Test R2: -0.0316, Test RMSE: 12.2830 min
+3 step ahead departure delay, Test MAE: 8.2166 min, Test R2: -0.6288, Test RMSE: 11.4133 min
+6 step ahead departure delay, Test MAE: 8.2178 min, Test R2: -0.6286, Test RMSE: 11.4147 min
+12 step ahead departure delay, Test MAE: 8.2156 min, Test R2: -0.6266, Test RMSE: 11.4105 min
+
+spdpnUS_ep14_MAE5.6039.pth
+3 step ahead arrival delay, Test MAE: 9.5603 min, Test R2: -0.1235, Test RMSE: 12.8146 min
+6 step ahead arrival delay, Test MAE: 9.6297 min, Test R2: -0.1410, Test RMSE: 12.9146 min
+12 step ahead arrival delay, Test MAE: 9.7190 min, Test R2: -0.1688, Test RMSE: 13.0740 min
+3 step ahead departure delay, Test MAE: 6.7216 min, Test R2: -0.0626, Test RMSE: 9.2186 min
+6 step ahead departure delay, Test MAE: 6.7409 min, Test R2: -0.0695, Test RMSE: 9.2502 min
+12 step ahead departure delay, Test MAE: 6.7561 min, Test R2: -0.0766, Test RMSE: 9.2829 min
+
+
+spdpnUS_ep8_MAE6.0160.pth
+3 step ahead arrival delay, Test MAE: 9.1474 min, Test R2: -0.0061, Test RMSE: 12.1261 min
+6 step ahead arrival delay, Test MAE: 9.1482 min, Test R2: -0.0062, Test RMSE: 12.1275 min
+12 step ahead arrival delay, Test MAE: 9.1507 min, Test R2: -0.0062, Test RMSE: 12.1309 min
+3 step ahead departure delay, Test MAE: 6.6325 min, Test R2: -0.0040, Test RMSE: 8.9609 min
+6 step ahead departure delay, Test MAE: 6.6348 min, Test R2: -0.0043, Test RMSE: 8.9637 min
+12 step ahead departure delay, Test MAE: 6.6374 min, Test R2: -0.0046, Test RMSE: 8.9674 min
+
+spdpnUS_ep4_MAE5.3187.pth
+3 step ahead arrival delay, Test MAE: 9.8208 min, Test R2: -0.1773, Test RMSE: 13.1178 min
+6 step ahead arrival delay, Test MAE: 9.8282 min, Test R2: -0.1794, Test RMSE: 13.1301 min
+12 step ahead arrival delay, Test MAE: 9.8378 min, Test R2: -0.1824, Test RMSE: 13.1498 min
+3 step ahead departure delay, Test MAE: 6.7093 min, Test R2: -0.1345, Test RMSE: 9.5252 min
+6 step ahead departure delay, Test MAE: 6.7149 min, Test R2: -0.1363, Test RMSE: 9.5347 min
+12 step ahead departure delay, Test MAE: 6.7200 min, Test R2: -0.1383, Test RMSE: 9.5455 min
+
+spdpnUS_ep5_MAE3.9246.pth
+3 step ahead arrival delay, Test MAE: 164.9255 min, Test R2: -218.0151, Test RMSE: 178.9155 min
+6 step ahead arrival delay, Test MAE: 164.8041 min, Test R2: -217.6601, Test RMSE: 178.7816 min
+12 step ahead arrival delay, Test MAE: 164.8070 min, Test R2: -217.5260, Test RMSE: 178.7695 min
+3 step ahead departure delay, Test MAE: 155.4765 min, Test R2: -333.3904, Test RMSE: 163.5335 min
+6 step ahead departure delay, Test MAE: 155.4688 min, Test R2: -333.1852, Test RMSE: 163.5100 min
+12 step ahead departure delay, Test MAE: 155.4840 min, Test R2: -333.0549, Test RMSE: 163.5197 min
+
+spdpnUS_ep15_MAE5.7169.pth
+3 step ahead arrival delay, Test MAE: 9.1441 min, Test R2: -0.0252, Test RMSE: 12.2411 min
+6 step ahead arrival delay, Test MAE: 9.1464 min, Test R2: -0.0257, Test RMSE: 12.2447 min
+12 step ahead arrival delay, Test MAE: 9.1507 min, Test R2: -0.0262, Test RMSE: 12.2509 min
+3 step ahead departure delay, Test MAE: 6.5266 min, Test R2: -0.0423, Test RMSE: 9.1302 min
+6 step ahead departure delay, Test MAE: 6.5296 min, Test R2: -0.0429, Test RMSE: 9.1344 min
+12 step ahead departure delay, Test MAE: 6.5341 min, Test R2: -0.0439, Test RMSE: 9.1409 min
+
+
+e=12 ep 10 5.7
+
+3 step ahead arrival delay, Test MAE: 11.5789 min, Test R2: -0.5584, Test RMSE: 15.0921 min
+6 step ahead arrival delay, Test MAE: 11.5836 min, Test R2: -0.5611, Test RMSE: 15.1059 min
+12 step ahead arrival delay, Test MAE: 11.5846 min, Test R2: -0.5629, Test RMSE: 15.1185 min
+3 step ahead departure delay, Test MAE: 6.9808 min, Test R2: -0.1430, Test RMSE: 9.5611 min
+6 step ahead departure delay, Test MAE: 6.9841 min, Test R2: -0.1439, Test RMSE: 9.5662 min
+12 step ahead departure delay, Test MAE: 6.9835 min, Test R2: -0.1438, Test RMSE: 9.5682 min
+e=10, ep 12 mae 5.63
+
+3 step ahead arrival delay, Test MAE: 9.3099 min, Test R2: -0.0430, Test RMSE: 12.3470 min
+6 step ahead arrival delay, Test MAE: 9.3058 min, Test R2: -0.0417, Test RMSE: 12.3396 min
+12 step ahead arrival delay, Test MAE: 9.3058 min, Test R2: -0.0396, Test RMSE: 12.3301 min
+3 step ahead departure delay, Test MAE: 6.8089 min, Test R2: -0.1213, Test RMSE: 9.4700 min
+6 step ahead departure delay, Test MAE: 6.8045 min, Test R2: -0.1179, Test RMSE: 9.4568 min
+12 step ahead departure delay, Test MAE: 6.8080 min, Test R2: -0.1155, Test RMSE: 9.4492 min
+
+e=9 
+3 step ahead arrival delay, Test MAE: 9.3893 min, Test R2: -0.0871, Test RMSE: 12.6050 min
+6 step ahead arrival delay, Test MAE: 9.8062 min, Test R2: -0.2043, Test RMSE: 13.2679 min
+12 step ahead arrival delay, Test MAE: 10.6174 min, Test R2: -0.4154, Test RMSE: 14.3876 min
+3 step ahead departure delay, Test MAE: 6.9707 min, Test R2: -0.0763, Test RMSE: 9.2780 min
+6 step ahead departure delay, Test MAE: 7.3409 min, Test R2: -0.2058, Test RMSE: 9.8216 min
+12 step ahead departure delay, Test MAE: 7.8596 min, Test R2: -0.3719, Test RMSE: 10.4791 min
+
+noiso.5_tgtep4max1.3
+
+
+
+noiso.5_tgtep4max1.5
+spdpnUS_ep9_MAE2.5784.pth

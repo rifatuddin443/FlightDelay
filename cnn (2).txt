@@ -1,0 +1,183 @@
+Epoch 001 | Train Loss 0.9359 | Val Loss 0.9333 | Val MAE 7.5947 R2 -0.0120 RMSE 9.8586 | ε ~ 0.05, δ=1e-05
+Epoch 002 | Train Loss 0.9263 | Val Loss 0.9267 | Val MAE 7.4609 R2 0.0015 RMSE 9.7919 | ε ~ 0.06, δ=1e-05
+Epoch 003 | Train Loss 0.9252 | Val Loss 0.9326 | Val MAE 7.6007 R2 -0.0104 RMSE 9.8499 | ε ~ 0.08, δ=1e-05
+Epoch 004 | Train Loss 0.9257 | Val Loss 0.9248 | Val MAE 7.4295 R2 0.0060 RMSE 9.7696 | ε ~ 0.09, δ=1e-05
+Epoch 005 | Train Loss 0.9252 | Val Loss 0.9269 | Val MAE 7.4900 R2 0.0017 RMSE 9.7898 | ε ~ 0.10, δ=1e-05
+Epoch 006 | Train Loss 0.9258 | Val Loss 0.9203 | Val MAE 7.4337 R2 0.0161 RMSE 9.7187 | ε ~ 0.11, δ=1e-05
+Epoch 007 | Train Loss 0.9246 | Val Loss 0.9296 | Val MAE 7.5372 R2 -0.0033 RMSE 9.8144 | ε ~ 0.12, δ=1e-05
+Epoch 008 | Train Loss 0.9256 | Val Loss 0.9254 | Val MAE 7.4577 R2 0.0057 RMSE 9.7701 | ε ~ 0.12, δ=1e-05
+Epoch 009 | Train Loss 0.9264 | Val Loss 0.9230 | Val MAE 7.4505 R2 0.0108 RMSE 9.7479 | ε ~ 0.13, δ=1e-05
+Epoch 010 | Train Loss 0.9238 | Val Loss 0.9179 | Val MAE 7.4001 R2 0.0207 RMSE 9.6994 | ε ~ 0.14, δ=1e-05
+Epoch 011 | Train Loss 0.9233 | Val Loss 0.9212 | Val MAE 7.3806 R2 0.0146 RMSE 9.7301 | ε ~ 0.15, δ=1e-05
+Epoch 012 | Train Loss 0.9230 | Val Loss 0.9102 | Val MAE 7.2217 R2 0.0379 RMSE 9.6141 | ε ~ 0.15, δ=1e-05
+Epoch 013 | Train Loss 0.9238 | Val Loss 0.9283 | Val MAE 7.5152 R2 -0.0002 RMSE 9.8030 | ε ~ 0.16, δ=1e-05
+Epoch 014 | Train Loss 0.9237 | Val Loss 0.9189 | Val MAE 7.3790 R2 0.0186 RMSE 9.7096 | ε ~ 0.16, δ=1e-05
+Epoch 015 | Train Loss 0.9249 | Val Loss 0.9230 | Val MAE 7.4258 R2 0.0103 RMSE 9.7511 | ε ~ 0.17, δ=1e-05
+Epoch 016 | Train Loss 0.9242 | Val Loss 0.9261 | Val MAE 7.4782 R2 0.0028 RMSE 9.7849 | ε ~ 0.18, δ=1e-05
+Epoch 017 | Train Loss 0.9233 | Val Loss 0.9277 | Val MAE 7.5068 R2 0.0011 RMSE 9.7940 | ε ~ 0.18, δ=1e-05
+Epoch 018 | Train Loss 0.9237 | Val Loss 0.9194 | Val MAE 7.3865 R2 0.0182 RMSE 9.7116 | ε ~ 0.19, δ=1e-05
+Epoch 019 | Train Loss 0.9243 | Val Loss 0.9231 | Val MAE 7.4303 R2 0.0104 RMSE 9.7505 | ε ~ 0.19, δ=1e-05
+Epoch 020 | Train Loss 0.9228 | Val Loss 0.9278 | Val MAE 7.5101 R2 -0.0001 RMSE 9.8019 | ε ~ 0.20, δ=1e-05
+Epoch 021 | Train Loss 0.9237 | Val Loss 0.9147 | Val MAE 7.2922 R2 0.0278 RMSE 9.6639 | ε ~ 0.20, δ=1e-05
+Epoch 022 | Train Loss 0.9228 | Val Loss 0.9315 | Val MAE 7.5403 R2 -0.0079 RMSE 9.8412 | ε ~ 0.21, δ=1e-05
+Epoch 023 | Train Loss 0.9237 | Val Loss 0.9114 | Val MAE 7.3000 R2 0.0339 RMSE 9.6350 | ε ~ 0.21, δ=1e-05
+Epoch 024 | Train Loss 0.9238 | Val Loss 0.9101 | Val MAE 7.2519 R2 0.0377 RMSE 9.6166 | ε ~ 0.22, δ=1e-05
+Epoch 025 | Train Loss 0.9233 | Val Loss 0.9123 | Val MAE 7.2857 R2 0.0336 RMSE 9.6349 | ε ~ 0.22, δ=1e-05
+Epoch 026 | Train Loss 0.9242 | Val Loss 0.9279 | Val MAE 7.5347 R2 0.0009 RMSE 9.7974 | ε ~ 0.23, δ=1e-05
+Epoch 027 | Train Loss 0.9229 | Val Loss 0.9197 | Val MAE 7.4203 R2 0.0179 RMSE 9.7151 | ε ~ 0.23, δ=1e-05
+Epoch 028 | Train Loss 0.9233 | Val Loss 0.9171 | Val MAE 7.3413 R2 0.0227 RMSE 9.6905 | ε ~ 0.23, δ=1e-05
+Epoch 029 | Train Loss 0.9258 | Val Loss 0.9178 | Val MAE 7.3856 R2 0.0223 RMSE 9.6932 | ε ~ 0.24, δ=1e-05
+Epoch 030 | Train Loss 0.9247 | Val Loss 0.9102 | Val MAE 7.2550 R2 0.0371 RMSE 9.6187 | ε ~ 0.24, δ=1e-05
+Epoch 031 | Train Loss 0.9240 | Val Loss 0.9197 | Val MAE 7.3840 R2 0.0176 RMSE 9.7155 | ε ~ 0.25, δ=1e-05
+Epoch 032 | Train Loss 0.9244 | Val Loss 0.9259 | Val MAE 7.4850 R2 0.0048 RMSE 9.7773 | ε ~ 0.25, δ=1e-05
+Epoch 033 | Train Loss 0.9232 | Val Loss 0.9182 | Val MAE 7.3553 R2 0.0208 RMSE 9.6999 | ε ~ 0.26, δ=1e-05
+Epoch 034 | Train Loss 0.9238 | Val Loss 0.9199 | Val MAE 7.3433 R2 0.0170 RMSE 9.7187 | ε ~ 0.26, δ=1e-05
+Epoch 035 | Train Loss 0.9237 | Val Loss 0.9162 | Val MAE 7.3493 R2 0.0254 RMSE 9.6771 | ε ~ 0.26, δ=1e-05
+Epoch 036 | Train Loss 0.9236 | Val Loss 0.9436 | Val MAE 7.7266 R2 -0.0341 RMSE 9.9678 | ε ~ 0.27, δ=1e-05
+Epoch 037 | Train Loss 0.9253 | Val Loss 0.9273 | Val MAE 7.4775 R2 0.0015 RMSE 9.7956 | ε ~ 0.27, δ=1e-05
+Epoch 038 | Train Loss 0.9238 | Val Loss 0.9334 | Val MAE 7.6064 R2 -0.0109 RMSE 9.8557 | ε ~ 0.27, δ=1e-05
+Epoch 039 | Train Loss 0.9245 | Val Loss 0.9370 | Val MAE 7.6265 R2 -0.0189 RMSE 9.8944 | ε ~ 0.28, δ=1e-05
+Epoch 040 | Train Loss 0.9238 | Val Loss 0.9325 | Val MAE 7.5745 R2 -0.0085 RMSE 9.8411 | ε ~ 0.28, δ=1e-05
+Epoch 041 | Train Loss 0.9236 | Val Loss 0.9286 | Val MAE 7.5247 R2 -0.0011 RMSE 9.8076 | ε ~ 0.29, δ=1e-05
+Epoch 042 | Train Loss 0.9235 | Val Loss 0.9175 | Val MAE 7.3376 R2 0.0226 RMSE 9.6908 | ε ~ 0.29, δ=1e-05
+Epoch 043 | Train Loss 0.9227 | Val Loss 0.9171 | Val MAE 7.3688 R2 0.0232 RMSE 9.6874 | ε ~ 0.29, δ=1e-05
+Epoch 044 | Train Loss 0.9232 | Val Loss 0.9252 | Val MAE 7.4922 R2 0.0068 RMSE 9.7684 | ε ~ 0.30, δ=1e-05
+Epoch 045 | Train Loss 0.9229 | Val Loss 0.9193 | Val MAE 7.3397 R2 0.0187 RMSE 9.7085 | ε ~ 0.30, δ=1e-05
+Epoch 046 | Train Loss 0.9231 | Val Loss 0.9276 | Val MAE 7.4896 R2 0.0008 RMSE 9.7973 | ε ~ 0.30, δ=1e-05
+Epoch 047 | Train Loss 0.9243 | Val Loss 0.9300 | Val MAE 7.5364 R2 -0.0040 RMSE 9.8201 | ε ~ 0.31, δ=1e-05
+Epoch 048 | Train Loss 0.9230 | Val Loss 0.9315 | Val MAE 7.5679 R2 -0.0073 RMSE 9.8365 | ε ~ 0.31, δ=1e-05
+Epoch 049 | Train Loss 0.9244 | Val Loss 0.9303 | Val MAE 7.5567 R2 -0.0044 RMSE 9.8230 | ε ~ 0.31, δ=1e-05
+Epoch 050 | Train Loss 0.9236 | Val Loss 0.9377 | Val MAE 7.6212 R2 -0.0207 RMSE 9.9011 | ε ~ 0.32, δ=1e-05
+Saved weights to: spdpnUS.pth
+PS D:\flight delay\stpn paper\STPN-main>  d:; cd 'd:\flight delay\stpn paper\STPN-main'; & 'c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\python.exe' 'c:\Users\Lenovo\.vscode\extensions\ms-python.debugpy-2025.10.0-win32-x64\bundled\libs\debugpy\launcher' '60092' '--' 'D:\flight delay\stpn paper\STPN-main\test_u_diffrentialprivacy.py' 
+3 step ahead arrival delay, Test MAE: 11.2003 min, Test R2: -0.3087, Test RMSE: 13.8303 min
+6 step ahead arrival delay, Test MAE: 11.2002 min, Test R2: -0.3085, Test RMSE: 13.8302 min
+12 step ahead arrival delay, Test MAE: 10.8097 min, Test R2: -0.2247, Test RMSE: 13.3832 min
+3 step ahead departure delay, Test MAE: 6.5290 min, Test R2: -0.1164, Test RMSE: 9.4492 min
+6 step ahead departure delay, Test MAE: 6.5305 min, Test R2: -0.1165, Test RMSE: 9.4511 min
+12 step ahead departure delay, Test MAE: 6.5382 min, Test R2: -0.1162, Test RMSE: 9.4524 min
+PS D:\flight delay\stpn paper\STPN-main>  d:; cd 'd:\flight delay\stpn paper\STPN-main'; & 'c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\python.exe' 'c:\Users\Lenovo\.vscode\extensions\ms-python.debugpy-2025.10.0-win32-x64\bundled\libs\debugpy\launcher' '60200' '--' 'D:\flight delay\stpn paper\STPN-main\training_u_diffrentialprivacy - cnnwx.py' 
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\opacus\privacy_engine.py:96: UserWarning: Secure RNG turned off. This is perfectly fine for experimentation as it allows for much faster training performance, but remember to turn it on and retrain one last time before production with ``secure_mode`` turned on.
+  warnings.warn(
+09/17/2025 14:52:43:WARNING:Ignoring drop_last as it is not compatible with DPDataLoader.
+[DP] Using noise_multiplier=2, max_grad_norm=1.5
+start training...
+Training metrics will be saved to: training_metrics_20250917_145243.csv
+D:\flight delay\stpn paper\STPN-main\training_u_diffrentialprivacy - cnnwx.py:292: UserWarning: Full backward hook is firing when gradients are computed with respect to module outputs since no inputs require gradients. See https://docs.pytorch.org/docs/main/generated/torch.nn.Module.html#torch.nn.Module.register_full_backward_hook for more details.
+  loss.backward()
+Epoch 001 | Train Loss 0.9558 | Val Loss 0.9809 | Val MAE 8.2217 R2 -0.1176 RMSE 10.3642 | ε ~ 0.06, δ=1e-05
+Epoch 002 | Train Loss 0.9327 | Val Loss 0.9600 | Val MAE 7.9708 R2 -0.0698 RMSE 10.1388 | ε ~ 0.09, δ=1e-05
+Epoch 003 | Train Loss 0.9285 | Val Loss 0.9469 | Val MAE 7.8097 R2 -0.0408 RMSE 9.9995 | ε ~ 0.11, δ=1e-05
+Epoch 004 | Train Loss 0.9278 | Val Loss 0.9377 | Val MAE 7.6810 R2 -0.0207 RMSE 9.9026 | ε ~ 0.12, δ=1e-05
+Epoch 005 | Train Loss 0.9259 | Val Loss 0.9311 | Val MAE 7.5941 R2 -0.0071 RMSE 9.8350 | ε ~ 0.14, δ=1e-05
+Epoch 006 | Train Loss 0.9251 | Val Loss 0.9326 | Val MAE 7.6098 R2 -0.0100 RMSE 9.8490 | ε ~ 0.15, δ=1e-05
+Epoch 007 | Train Loss 0.9241 | Val Loss 0.9313 | Val MAE 7.5751 R2 -0.0073 RMSE 9.8358 | ε ~ 0.17, δ=1e-05
+Epoch 008 | Train Loss 0.9240 | Val Loss 0.9323 | Val MAE 7.5988 R2 -0.0096 RMSE 9.8470 | ε ~ 0.18, δ=1e-05
+Epoch 009 | Train Loss 0.9253 | Val Loss 0.9272 | Val MAE 7.5456 R2 0.0013 RMSE 9.7935 | ε ~ 0.19, δ=1e-05
+Epoch 010 | Train Loss 0.9241 | Val Loss 0.9251 | Val MAE 7.5163 R2 0.0056 RMSE 9.7724 | ε ~ 0.20, δ=1e-05
+Epoch 011 | Train Loss 0.9242 | Val Loss 0.9282 | Val MAE 7.5567 R2 -0.0011 RMSE 9.8052 | ε ~ 0.21, δ=1e-05
+Epoch 012 | Train Loss 0.9232 | Val Loss 0.9265 | Val MAE 7.5199 R2 0.0026 RMSE 9.7875 | ε ~ 0.22, δ=1e-05
+Epoch 013 | Train Loss 0.9234 | Val Loss 0.9303 | Val MAE 7.5832 R2 -0.0057 RMSE 9.8282 | ε ~ 0.23, δ=1e-05
+Epoch 014 | Train Loss 0.9237 | Val Loss 0.9269 | Val MAE 7.5343 R2 0.0016 RMSE 9.7917 | ε ~ 0.24, δ=1e-05
+Epoch 015 | Train Loss 0.9232 | Val Loss 0.9264 | Val MAE 7.5387 R2 0.0026 RMSE 9.7875 | ε ~ 0.24, δ=1e-05
+Epoch 016 | Train Loss 0.9242 | Val Loss 0.9272 | Val MAE 7.5380 R2 0.0010 RMSE 9.7945 | ε ~ 0.25, δ=1e-05
+Epoch 017 | Train Loss 0.9231 | Val Loss 0.9238 | Val MAE 7.4922 R2 0.0081 RMSE 9.7594 | ε ~ 0.26, δ=1e-05
+Epoch 018 | Train Loss 0.9225 | Val Loss 0.9313 | Val MAE 7.6013 R2 -0.0077 RMSE 9.8370 | ε ~ 0.27, δ=1e-05
+Epoch 019 | Train Loss 0.9232 | Val Loss 0.9284 | Val MAE 7.5637 R2 -0.0017 RMSE 9.8077 | ε ~ 0.28, δ=1e-05
+Epoch 020 | Train Loss 0.9231 | Val Loss 0.9291 | Val MAE 7.5706 R2 -0.0031 RMSE 9.8146 | ε ~ 0.28, δ=1e-05
+Epoch 021 | Train Loss 0.9224 | Val Loss 0.9295 | Val MAE 7.5596 R2 -0.0037 RMSE 9.8173 | ε ~ 0.29, δ=1e-05
+Epoch 022 | Train Loss 0.9227 | Val Loss 0.9212 | Val MAE 7.4553 R2 0.0137 RMSE 9.7320 | ε ~ 0.30, δ=1e-05
+Epoch 023 | Train Loss 0.9232 | Val Loss 0.9270 | Val MAE 7.5246 R2 0.0015 RMSE 9.7924 | ε ~ 0.31, δ=1e-05
+Epoch 024 | Train Loss 0.9223 | Val Loss 0.9272 | Val MAE 7.5376 R2 0.0009 RMSE 9.7955 | ε ~ 0.31, δ=1e-05
+Epoch 025 | Train Loss 0.9224 | Val Loss 0.9328 | Val MAE 7.6163 R2 -0.0109 RMSE 9.8528 | ε ~ 0.32, δ=1e-05
+Epoch 026 | Train Loss 0.9225 | Val Loss 0.9217 | Val MAE 7.4603 R2 0.0126 RMSE 9.7382 | ε ~ 0.33, δ=1e-05
+Epoch 027 | Train Loss 0.9221 | Val Loss 0.9264 | Val MAE 7.5327 R2 0.0029 RMSE 9.7863 | ε ~ 0.33, δ=1e-05
+Epoch 028 | Train Loss 0.9217 | Val Loss 0.9251 | Val MAE 7.5171 R2 0.0056 RMSE 9.7726 | ε ~ 0.34, δ=1e-05
+Epoch 029 | Train Loss 0.9223 | Val Loss 0.9256 | Val MAE 7.5142 R2 0.0045 RMSE 9.7780 | ε ~ 0.34, δ=1e-05
+Epoch 030 | Train Loss 0.9219 | Val Loss 0.9299 | Val MAE 7.5846 R2 -0.0045 RMSE 9.8229 | ε ~ 0.35, δ=1e-05
+Epoch 031 | Train Loss 0.9224 | Val Loss 0.9296 | Val MAE 7.5609 R2 -0.0040 RMSE 9.8201 | ε ~ 0.36, δ=1e-05
+Epoch 032 | Train Loss 0.9218 | Val Loss 0.9220 | Val MAE 7.4555 R2 0.0120 RMSE 9.7406 | ε ~ 0.36, δ=1e-05
+Epoch 033 | Train Loss 0.9220 | Val Loss 0.9279 | Val MAE 7.5554 R2 -0.0006 RMSE 9.8030 | ε ~ 0.37, δ=1e-05
+Epoch 034 | Train Loss 0.9219 | Val Loss 0.9237 | Val MAE 7.4981 R2 0.0085 RMSE 9.7578 | ε ~ 0.37, δ=1e-05
+Epoch 035 | Train Loss 0.9222 | Val Loss 0.9214 | Val MAE 7.4448 R2 0.0133 RMSE 9.7340 | ε ~ 0.38, δ=1e-05
+Epoch 036 | Train Loss 0.9218 | Val Loss 0.9224 | Val MAE 7.4834 R2 0.0112 RMSE 9.7446 | ε ~ 0.39, δ=1e-05
+Epoch 037 | Train Loss 0.9213 | Val Loss 0.9241 | Val MAE 7.4939 R2 0.0077 RMSE 9.7615 | ε ~ 0.39, δ=1e-05
+Epoch 038 | Train Loss 0.9209 | Val Loss 0.9202 | Val MAE 7.4357 R2 0.0159 RMSE 9.7213 | ε ~ 0.40, δ=1e-05
+Epoch 039 | Train Loss 0.9213 | Val Loss 0.9204 | Val MAE 7.4423 R2 0.0156 RMSE 9.7234 | ε ~ 0.40, δ=1e-05
+Epoch 040 | Train Loss 0.9225 | Val Loss 0.9256 | Val MAE 7.5106 R2 0.0045 RMSE 9.7781 | ε ~ 0.41, δ=1e-05
+Epoch 041 | Train Loss 0.9217 | Val Loss 0.9192 | Val MAE 7.4252 R2 0.0179 RMSE 9.7117 | ε ~ 0.41, δ=1e-05
+Epoch 042 | Train Loss 0.9231 | Val Loss 0.9264 | Val MAE 7.5382 R2 0.0029 RMSE 9.7857 | ε ~ 0.42, δ=1e-05
+Epoch 043 | Train Loss 0.9207 | Val Loss 0.9269 | Val MAE 7.5284 R2 0.0020 RMSE 9.7902 | ε ~ 0.42, δ=1e-05
+Epoch 044 | Train Loss 0.9223 | Val Loss 0.9257 | Val MAE 7.5139 R2 0.0045 RMSE 9.7781 | ε ~ 0.43, δ=1e-05
+Epoch 045 | Train Loss 0.9223 | Val Loss 0.9260 | Val MAE 7.5355 R2 0.0037 RMSE 9.7816 | ε ~ 0.43, δ=1e-05
+Epoch 046 | Train Loss 0.9218 | Val Loss 0.9272 | Val MAE 7.5275 R2 0.0011 RMSE 9.7941 | ε ~ 0.44, δ=1e-05
+Epoch 047 | Train Loss 0.9217 | Val Loss 0.9222 | Val MAE 7.4565 R2 0.0116 RMSE 9.7431 | ε ~ 0.44, δ=1e-05
+Epoch 048 | Train Loss 0.9221 | Val Loss 0.9293 | Val MAE 7.5502 R2 -0.0036 RMSE 9.8175 | ε ~ 0.45, δ=1e-05
+Epoch 049 | Train Loss 0.9220 | Val Loss 0.9237 | Val MAE 7.4894 R2 0.0084 RMSE 9.7590 | ε ~ 0.45, δ=1e-05
+Epoch 050 | Train Loss 0.9211 | Val Loss 0.9224 | Val MAE 7.4692 R2 0.0111 RMSE 9.7450 | ε ~ 0.46, δ=1e-05
+Saved weights to: spdpnUS.pth
+
+3 step ahead arrival delay, Test MAE: 12.1690 min, Test R2: -0.4669, Test RMSE: 14.6423 min
+6 step ahead arrival delay, Test MAE: 12.1684 min, Test R2: -0.4666, Test RMSE: 14.6418 min
+12 step ahead arrival delay, Test MAE: 11.1049 min, Test R2: -0.2640, Test RMSE: 13.5959 min
+3 step ahead departure delay, Test MAE: 6.7704 min, Test R2: -0.0509, Test RMSE: 9.1676 min
+6 step ahead departure delay, Test MAE: 6.7715 min, Test R2: -0.0509, Test RMSE: 9.1692 min
+12 step ahead departure delay, Test MAE: 6.5954 min, Test R2: -0.0539, Test RMSE: 9.1846 min
+
+new arch no dropout 
+Epoch 001 | Train Loss 0.9514 | Val Loss 0.9627 | Val MAE 8.0365 R2 -0.0771 RMSE 10.1731 | ε ~ 0.06, δ=1e-05
+Epoch 002 | Train Loss 0.9340 | Val Loss 0.9537 | Val MAE 7.9216 R2 -0.0566 RMSE 10.0754 | ε ~ 0.09, δ=1e-05
+Epoch 003 | Train Loss 0.9309 | Val Loss 0.9404 | Val MAE 7.7258 R2 -0.0271 RMSE 9.9336 | ε ~ 0.11, δ=1e-05
+Epoch 004 | Train Loss 0.9304 | Val Loss 0.9446 | Val MAE 7.7857 R2 -0.0363 RMSE 9.9780 | ε ~ 0.12, δ=1e-05
+Epoch 005 | Train Loss 0.9284 | Val Loss 0.9345 | Val MAE 7.6470 R2 -0.0142 RMSE 9.8709 | ε ~ 0.14, δ=1e-05
+Epoch 006 | Train Loss 0.9280 | Val Loss 0.9321 | Val MAE 7.6133 R2 -0.0091 RMSE 9.8456 | ε ~ 0.15, δ=1e-05
+Epoch 007 | Train Loss 0.9275 | Val Loss 0.9375 | Val MAE 7.6880 R2 -0.0205 RMSE 9.9015 | ε ~ 0.17, δ=1e-05
+Epoch 008 | Train Loss 0.9274 | Val Loss 0.9353 | Val MAE 7.6458 R2 -0.0160 RMSE 9.8794 | ε ~ 0.18, δ=1e-05
+Epoch 009 | Train Loss 0.9261 | Val Loss 0.9331 | Val MAE 7.6100 R2 -0.0112 RMSE 9.8558 | ε ~ 0.19, δ=1e-05
+Epoch 010 | Train Loss 0.9276 | Val Loss 0.9293 | Val MAE 7.5585 R2 -0.0028 RMSE 9.8148 | ε ~ 0.20, δ=1e-05
+Epoch 011 | Train Loss 0.9270 | Val Loss 0.9305 | Val MAE 7.5911 R2 -0.0056 RMSE 9.8286 | ε ~ 0.21, δ=1e-05
+Epoch 012 | Train Loss 0.9256 | Val Loss 0.9292 | Val MAE 7.5559 R2 -0.0028 RMSE 9.8146 | ε ~ 0.22, δ=1e-05
+Epoch 013 | Train Loss 0.9258 | Val Loss 0.9249 | Val MAE 7.5173 R2 0.0066 RMSE 9.7685 | ε ~ 0.23, δ=1e-05
+Epoch 014 | Train Loss 0.9259 | Val Loss 0.9314 | Val MAE 7.6076 R2 -0.0073 RMSE 9.8364 | ε ~ 0.24, δ=1e-05
+Epoch 015 | Train Loss 0.9256 | Val Loss 0.9298 | Val MAE 7.5733 R2 -0.0039 RMSE 9.8195 | ε ~ 0.24, δ=1e-05
+Epoch 016 | Train Loss 0.9248 | Val Loss 0.9244 | Val MAE 7.5038 R2 0.0076 RMSE 9.7632 | ε ~ 0.25, δ=1e-05
+Epoch 017 | Train Loss 0.9252 | Val Loss 0.9309 | Val MAE 7.5750 R2 -0.0062 RMSE 9.8301 | ε ~ 0.26, δ=1e-05
+Epoch 018 | Train Loss 0.9251 | Val Loss 0.9337 | Val MAE 7.6174 R2 -0.0121 RMSE 9.8590 | ε ~ 0.27, δ=1e-05
+Epoch 019 | Train Loss 0.9251 | Val Loss 0.9282 | Val MAE 7.5646 R2 -0.0005 RMSE 9.8026 | ε ~ 0.28, δ=1e-05
+Epoch 020 | Train Loss 0.9254 | Val Loss 0.9320 | Val MAE 7.6004 R2 -0.0086 RMSE 9.8424 | ε ~ 0.28, δ=1e-05
+Epoch 021 | Train Loss 0.9250 | Val Loss 0.9279 | Val MAE 7.5654 R2 -0.0001 RMSE 9.8009 | ε ~ 0.29, δ=1e-05
+Epoch 022 | Train Loss 0.9252 | Val Loss 0.9287 | Val MAE 7.5618 R2 -0.0018 RMSE 9.8097 | ε ~ 0.30, δ=1e-05
+Epoch 023 | Train Loss 0.9260 | Val Loss 0.9300 | Val MAE 7.5812 R2 -0.0043 RMSE 9.8218 | ε ~ 0.31, δ=1e-05
+Epoch 024 | Train Loss 0.9263 | Val Loss 0.9285 | Val MAE 7.5550 R2 -0.0012 RMSE 9.8063 | ε ~ 0.31, δ=1e-05
+Epoch 025 | Train Loss 0.9255 | Val Loss 0.9355 | Val MAE 7.6684 R2 -0.0165 RMSE 9.8810 | ε ~ 0.32, δ=1e-05
+Epoch 026 | Train Loss 0.9248 | Val Loss 0.9301 | Val MAE 7.5886 R2 -0.0046 RMSE 9.8234 | ε ~ 0.33, δ=1e-05
+Epoch 027 | Train Loss 0.9252 | Val Loss 0.9267 | Val MAE 7.5403 R2 0.0024 RMSE 9.7888 | ε ~ 0.33, δ=1e-05
+Epoch 028 | Train Loss 0.9242 | Val Loss 0.9312 | Val MAE 7.5984 R2 -0.0071 RMSE 9.8347 | ε ~ 0.34, δ=1e-05
+Epoch 029 | Train Loss 0.9262 | Val Loss 0.9269 | Val MAE 7.5495 R2 0.0018 RMSE 9.7914 | ε ~ 0.34, δ=1e-05
+Epoch 030 | Train Loss 0.9238 | Val Loss 0.9267 | Val MAE 7.5350 R2 0.0025 RMSE 9.7881 | ε ~ 0.35, δ=1e-05
+Epoch 031 | Train Loss 0.9240 | Val Loss 0.9250 | Val MAE 7.5190 R2 0.0060 RMSE 9.7713 | ε ~ 0.36, δ=1e-05
+Epoch 032 | Train Loss 0.9252 | Val Loss 0.9288 | Val MAE 7.5839 R2 -0.0022 RMSE 9.8111 | ε ~ 0.36, δ=1e-05
+Epoch 033 | Train Loss 0.9244 | Val Loss 0.9279 | Val MAE 7.5494 R2 -0.0004 RMSE 9.8023 | ε ~ 0.37, δ=1e-05
+Epoch 034 | Train Loss 0.9245 | Val Loss 0.9246 | Val MAE 7.4954 R2 0.0065 RMSE 9.7681 | ε ~ 0.37, δ=1e-05
+Epoch 035 | Train Loss 0.9248 | Val Loss 0.9321 | Val MAE 7.6028 R2 -0.0093 RMSE 9.8455 | ε ~ 0.38, δ=1e-05
+Epoch 036 | Train Loss 0.9248 | Val Loss 0.9300 | Val MAE 7.6025 R2 -0.0051 RMSE 9.8249 | ε ~ 0.39, δ=1e-05
+Epoch 037 | Train Loss 0.9236 | Val Loss 0.9319 | Val MAE 7.6135 R2 -0.0092 RMSE 9.8454 | ε ~ 0.39, δ=1e-05
+Epoch 038 | Train Loss 0.9245 | Val Loss 0.9318 | Val MAE 7.5991 R2 -0.0087 RMSE 9.8426 | ε ~ 0.40, δ=1e-05
+Epoch 039 | Train Loss 0.9251 | Val Loss 0.9268 | Val MAE 7.5192 R2 0.0019 RMSE 9.7906 | ε ~ 0.40, δ=1e-05
+Epoch 040 | Train Loss 0.9247 | Val Loss 0.9294 | Val MAE 7.5613 R2 -0.0038 RMSE 9.8185 | ε ~ 0.41, δ=1e-05
+Epoch 041 | Train Loss 0.9231 | Val Loss 0.9271 | Val MAE 7.5435 R2 0.0010 RMSE 9.7951 | ε ~ 0.41, δ=1e-05
+Epoch 042 | Train Loss 0.9240 | Val Loss 0.9232 | Val MAE 7.4935 R2 0.0097 RMSE 9.7529 | ε ~ 0.42, δ=1e-05
+Epoch 043 | Train Loss 0.9235 | Val Loss 0.9271 | Val MAE 7.5359 R2 0.0010 RMSE 9.7950 | ε ~ 0.42, δ=1e-05
+Epoch 044 | Train Loss 0.9233 | Val Loss 0.9315 | Val MAE 7.6112 R2 -0.0084 RMSE 9.8407 | ε ~ 0.43, δ=1e-05
+Epoch 045 | Train Loss 0.9238 | Val Loss 0.9262 | Val MAE 7.5265 R2 0.0031 RMSE 9.7851 | ε ~ 0.43, δ=1e-05
+Epoch 046 | Train Loss 0.9241 | Val Loss 0.9304 | Val MAE 7.6052 R2 -0.0057 RMSE 9.8285 | ε ~ 0.44, δ=1e-05
+Epoch 047 | Train Loss 0.9240 | Val Loss 0.9263 | Val MAE 7.5220 R2 0.0030 RMSE 9.7853 | ε ~ 0.44, δ=1e-05
+Epoch 048 | Train Loss 0.9249 | Val Loss 0.9295 | Val MAE 7.5906 R2 -0.0036 RMSE 9.8177 | ε ~ 0.45, δ=1e-05
+Epoch 049 | Train Loss 0.9237 | Val Loss 0.9261 | Val MAE 7.5287 R2 0.0037 RMSE 9.7818 | ε ~ 0.45, δ=1e-05
+Epoch 050 | Train Loss 0.9235 | Val Loss 0.9283 | Val MAE 7.5501 R2 -0.0013 RMSE 9.8069 | ε ~ 0.46, δ=1e-05
+3 step ahead arrival delay, Test MAE: 10.0643 min, Test R2: -0.0870, Test RMSE: 12.6043 min
+6 step ahead arrival delay, Test MAE: 10.0642 min, Test R2: -0.0868, Test RMSE: 12.6043 min
+12 step ahead arrival delay, Test MAE: 10.3593 min, Test R2: -0.1378, Test RMSE: 12.8996 min
+3 step ahead departure delay, Test MAE: 6.6677 min, Test R2: -0.0166, Test RMSE: 9.0168 min
+6 step ahead departure delay, Test MAE: 6.6687 min, Test R2: -0.0166, Test RMSE: 9.0183 min
+12 step ahead departure delay, Test MAE: 6.8331 min, Test R2: -0.0151, Test RMSE: 9.0138 min

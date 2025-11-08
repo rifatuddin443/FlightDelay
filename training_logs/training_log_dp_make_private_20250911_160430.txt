@@ -1,0 +1,6 @@
+=== Training Configuration ===
+Original model parameters: 94140
+=== Model Compatibility Check ===
+Found 4 compatibility issues:
+Applying automatic fixes...
+Model automatically fixed for DP compatibility

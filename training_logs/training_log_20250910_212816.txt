@@ -1,0 +1,10 @@
+=== Training Configuration ===
+Model parameters: 94140
+Learning rate: 0.001
+Batch size: 32
+start training...
+
+Epoch 1/50
+Training - Average Loss: 0.8613, MAE: 6.4418
+Validation - MAE: nan, R2: 1.0000, RMSE: nan
+--------------------------------------------------------------------------------

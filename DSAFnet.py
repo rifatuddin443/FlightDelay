@@ -99,10 +99,6 @@ class DSAFNet(nn.Module):
             to: Time output embeddings (optional)
             w: Weather conditions (optional)
         """
-        # Verify input is on the same device as model
-        model_device = next(self.parameters()).device
-        if x.device != model_device:
-            x = x.to(model_device)
         
         # Handle the input shape transformation for DSAFNet
         # Expected: (batch_size, airports, time_steps, features)
@@ -318,17 +314,10 @@ def main():
     parser.add_argument("--output_dir", type=str, default="./results", help="Directory to save training results")
     args = parser.parse_args()
 
-    # === ENHANCED DEVICE SETUP AND DEBUGGING ===
+    # === ENHANCED DEVICE SETUP ===
     print("="*60)
     print("🚀 DEVICE CONFIGURATION")
     print("="*60)
-    print(f"📝 Requested device: {args.device}")
-    print(f"🔍 CUDA available: {torch.cuda.is_available()}")
-    
-    if torch.cuda.is_available():
-        print(f"🎯 CUDA device count: {torch.cuda.device_count()}")
-        print(f"💻 CUDA device name: {torch.cuda.get_device_name(0)}")
-        print(f"🔧 CUDA version: {torch.version.cuda}")
     
     # Force CUDA if available, fallback to CPU if not
     if torch.cuda.is_available():
@@ -336,23 +325,18 @@ def main():
             device = torch.device(args.device)
         else:
             device = torch.device('cuda:0')
-            print(f"⚠️  Device argument was '{args.device}', but CUDA is available. Forcing cuda:0")
     else:
         device = torch.device('cpu')
-        print("❌ CUDA not available, falling back to CPU")
     
     print(f"✅ Final device: {device}")
-    print(f"📊 Device type: {device.type}")
     print("="*60)
     
     # Enable optimizations
     if device.type == 'cuda':
-        torch.cuda.empty_cache()  # Clear CUDA cache
+        torch.cuda.empty_cache()
         print(f"🎮 Using GPU: {torch.cuda.get_device_name()}")
-        print(f"💾 CUDA memory allocated: {torch.cuda.memory_allocated()/1024**2:.1f} MB")
-        print(f"💾 CUDA memory cached: {torch.cuda.memory_reserved()/1024**2:.1f} MB")
     else:
-        print("⚠️  Using CPU - CUDA not available or not selected")
+        print("⚠️  Using CPU")
     
     # Create output directory if it doesn't exist
     os.makedirs(args.output_dir, exist_ok=True)
@@ -374,44 +358,15 @@ def main():
         num_graphs=args.support_len
     )
     print(f"📦 Model created with {sum(p.numel() for p in model.parameters())} parameters")
-    print(f"🔧 Model on device before .to(): {next(model.parameters()).device}")
     
-    # Move model to device with verification
+    # Move model to device
     model = model.to(device)
     
-    # Force all parameters to the correct device
-    for param in model.parameters():
-        param.data = param.data.to(device)
-        if param.grad is not None:
-            param.grad.data = param.grad.data.to(device)
-    
-    # Verify all model parameters are on the correct device
-    model_device = next(model.parameters()).device
-    print(f"✅ Model moved to device: {model_device}")
-    
-    # Additional verification
-    if device.type == 'cuda':
-        assert model_device.type == 'cuda', f"Model not on CUDA! Model device: {model_device}"
-        print(f"🔥 CUDA verification passed - Model is on {model_device}")
-        
-        # Test a dummy forward pass to ensure GPU utilization
-        with torch.no_grad():
-            dummy_input = torch.randn(1, 2, 10, 12).to(device)
-            dummy_output = model(dummy_input)
-            print(f"🧪 Dummy forward pass successful - Output device: {dummy_output.device}")
-            del dummy_input, dummy_output
-            torch.cuda.empty_cache()
-    
+    print(f"✅ Model moved to device: {device}")
     print("Using DSAFNet model")
     print("="*60)
 
     supports = [torch.tensor(i, dtype=torch.float32, device=device) for i in adj]
-    
-    # Verify supports are on correct device
-    if supports and device.type == 'cuda':
-        for i, support in enumerate(supports):
-            assert support.is_cuda, f"Support matrix {i} not on CUDA: {support.device}"
-        print(f"✅ All {len(supports)} support matrices moved to {device}")
     
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.decay)
 
@@ -506,11 +461,6 @@ def main():
     print("\n" + "="*60)
     print("🚀 TRAINING LOOP STARTED")
     print("="*60)
-    print(f"📊 Model device: {next(model.parameters()).device}")
-    print(f"📊 Optimizer device: {device}")
-    if device.type == 'cuda':
-        print(f"💾 Initial GPU memory: {torch.cuda.memory_allocated()/1024**2:.1f} MB")
-    print("="*60)
 
     # Initialize CSV file for logging training metrics
     csv_headers = ['epoch', 'training_loss', 'validation_loss', 'validation_mae', 'validation_r2', 'validation_rmse', 'epsilon']
@@ -555,29 +505,12 @@ def main():
         for batch_idx, batch in enumerate(train_loader):
             trainx, trainy, trainti, trainto, trainw = batch
             
-            # Move to device with explicit CUDA enforcement
+            # Move to device
             trainx = trainx.to(device, non_blocking=False)
             trainy = trainy.to(device, non_blocking=False)
             trainti = trainti.to(device, non_blocking=False)
             trainto = trainto.to(device, non_blocking=False)
             trainw = trainw.to(device, non_blocking=False)
-            
-            # Verify tensors are actually on GPU
-            if device.type == 'cuda':
-                assert trainx.is_cuda, f"trainx not on CUDA: {trainx.device}"
-                assert trainy.is_cuda, f"trainy not on CUDA: {trainy.device}"
-                assert trainti.is_cuda, f"trainti not on CUDA: {trainti.device}"
-                assert trainto.is_cuda, f"trainto not on CUDA: {trainto.device}"
-                assert trainw.is_cuda, f"trainw not on CUDA: {trainw.device}"
-
-            # Debug tensor devices in first batch of first epoch
-            if ep == 1 and batch_idx == 0:
-                print(f"\n🔍 FIRST BATCH DEVICE CHECK:")
-                print(f"   trainx device: {trainx.device}")
-                print(f"   trainy device: {trainy.device}")
-                print(f"   model device: {next(model.parameters()).device}")
-                if device.type == 'cuda':
-                    print(f"   GPU memory before forward: {torch.cuda.memory_allocated()/1024**2:.1f} MB")
 
             if trainx.dim() == 3:
                 trainx = trainx.unsqueeze(0)
@@ -590,22 +523,7 @@ def main():
 
             optimizer.zero_grad(set_to_none=True)
             
-            # Ensure model is still on correct device
-            if device.type == 'cuda' and not next(model.parameters()).is_cuda:
-                print("⚠️ WARNING: Model moved to CPU during training! Moving back to CUDA...")
-                model = model.to(device)
-            
             output = model(trainx, trainti, supports, trainto, trainw)
-            
-            # Verify output is on GPU
-            if device.type == 'cuda' and not output.is_cuda:
-                raise RuntimeError(f"Model output not on CUDA! Output device: {output.device}")
-            
-            # Debug output device in first batch of first epoch
-            if ep == 1 and batch_idx == 0:
-                print(f"   output device: {output.device}")
-                if device.type == 'cuda':
-                    print(f"   GPU memory after forward: {torch.cuda.memory_allocated()/1024**2:.1f} MB")
             
             # Handle shape mismatch if output and target have different shapes
             if output.shape != trainy.shape:
@@ -626,10 +544,6 @@ def main():
                 print(f"ERROR in optimizer.step(): {e}")
                 print(f"Error type: {type(e)}")
                 raise Exception("Error occurred during optimizer.step()")
-            
-            # Force CUDA synchronization to ensure GPU computation
-            if device.type == 'cuda':
-                torch.cuda.synchronize()
             
             # Accumulate training loss for this epoch
             epoch_training_loss += loss.item()

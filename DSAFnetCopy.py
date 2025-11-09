@@ -150,7 +150,7 @@ def load_flight_delay_data(dataset='US', data_dir='.', sequence_length=12, predi
         num_airports: Number of airports
     """
     
-    print(f"🔄 Loading {dataset} flight delay dataset...")
+    print(f"Loading {dataset} flight delay dataset...")
     
     if dataset.upper() == 'US':
         data_folder = os.path.join(data_dir, 'udata')
@@ -168,14 +168,14 @@ def load_flight_delay_data(dataset='US', data_dir='.', sequence_length=12, predi
     # Load delay data
     if os.path.exists(delay_file):
         delay_data = np.load(delay_file)
-        print(f"✅ Loaded delay data: {delay_data.shape}")
+        print(f"Loaded delay data: {delay_data.shape}")
     else:
         raise FileNotFoundError(f"Delay data file not found: {delay_file}")
     
     # Load adjacency matrix
     if os.path.exists(adj_file):
         adj_matrix = np.load(adj_file)
-        print(f"✅ Loaded adjacency matrix: {adj_matrix.shape}")
+        print(f"Loaded adjacency matrix: {adj_matrix.shape}")
         
         # Create multiple graph views
         adj_matrices = []
@@ -203,7 +203,7 @@ def load_flight_delay_data(dataset='US', data_dir='.', sequence_length=12, predi
     weather_data = None
     if os.path.exists(weather_file):
         weather_data = np.load(weather_file)
-        print(f"✅ Loaded weather data: {weather_data.shape}")
+        print(f"Loaded weather data: {weather_data.shape}")
     else:
         print(f"⚠️  Weather data not found: {weather_file}")
     
@@ -211,7 +211,7 @@ def load_flight_delay_data(dataset='US', data_dir='.', sequence_length=12, predi
     od_data = None
     if od_file and os.path.exists(od_file):
         od_data = np.load(od_file)
-        print(f"✅ Loaded OD data: {od_data.shape}")
+        print(f"Loaded OD data: {od_data.shape}")
     
     # Process delay data
     # Check data dimensions and correct if needed
@@ -236,7 +236,7 @@ def load_flight_delay_data(dataset='US', data_dir='.', sequence_length=12, predi
     else:
         raise ValueError(f"Unexpected delay data shape: {delay_data.shape}")
     
-    print(f"📊 Final dataset info: {time_steps} time steps, {num_airports} airports, {num_features} delay features")
+    print(f"Dataset: {time_steps} timesteps, {num_airports} airports, {num_features} features")
     
     # Verify dimensions match adjacency matrix
     if num_airports != adj_matrix.shape[0]:
@@ -246,13 +246,12 @@ def load_flight_delay_data(dataset='US', data_dir='.', sequence_length=12, predi
     # Handle NaN values
     nan_count = np.isnan(delay_data).sum()
     if nan_count > 0:
-        print(f"⚠️  Found {nan_count} NaN values ({nan_count/delay_data.size*100:.2f}% of data)")
-        print("🔧 Replacing NaN values with zeros...")
+        print(f"Found {nan_count} NaN values ({nan_count/delay_data.size*100:.2f}%), replacing with zeros...")
         delay_data = np.nan_to_num(delay_data, nan=0.0)
     
     # Check for reasonable data ranges
     data_min, data_max = delay_data.min(), delay_data.max()
-    print(f"📊 Data range: [{data_min:.4f}, {data_max:.4f}]")
+    print(f"Data range: [{data_min:.4f}, {data_max:.4f}]")
     
     if abs(data_max) > 1000:  # Delays in minutes shouldn't exceed ~1000
         print("⚠️  Data values seem very large - you might want to check units or scaling")
@@ -271,11 +270,9 @@ def load_flight_delay_data(dataset='US', data_dir='.', sequence_length=12, predi
                 weather_data_processed = weather_data
                 print(f"✅ Weather data prepared: {weather_data_processed.shape}")
     
-    # Return raw data - normalization will be done ONLY on training data to prevent leakage
     scaler = None
     if normalize:
-        print("📊 Normalization will be applied later using ONLY training data to prevent leakage")
-        print("✅ Data leakage prevention enabled")
+        print("Normalization will be applied using training data only")
     
     return delay_data, weather_data_processed, adj_matrices, scaler, num_airports, time_steps
 
@@ -414,12 +411,7 @@ def create_datasets(data, weather_data, adj_matrices, in_len, out_len,
     val_indices = all_indices[train_size:train_size + val_size]
     test_indices = all_indices[train_size + val_size:]
     
-    print(f"📊 Sliding Window Dataset Creation:")
-    print(f"   Total time steps: {time_steps}")
-    print(f"   Valid sequence positions: {total_valid_indices}")
-    print(f"   Train sequences: {len(train_indices)}")
-    print(f"   Validation sequences: {len(val_indices)}")
-    print(f"   Test sequences: {len(test_indices)}")
+    print(f"Dataset split: {len(train_indices)} train, {len(val_indices)} val, {len(test_indices)} test sequences")
     
     # CRITICAL: Fit normalization ONLY on training data to prevent leakage
     fitted_scaler = None
@@ -429,7 +421,7 @@ def create_datasets(data, weather_data, adj_matrices, in_len, out_len,
         from sklearn.preprocessing import StandardScaler
         fitted_scaler = StandardScaler()
         
-        print("🔄 Fitting normalization on TRAINING DATA ONLY...")
+        print("Fitting normalization on training data only...")
         
         # Extract only training sequences for normalization
         train_data_for_norm = []
@@ -448,20 +440,14 @@ def create_datasets(data, weather_data, adj_matrices, in_len, out_len,
         
         if len(valid_train_data) > 0:
             fitted_scaler.fit(valid_train_data)
-            
-            # Apply normalization to entire dataset
             original_shape = data.shape
             data_flattened = data.reshape(-1, data.shape[2])
             normalized_flattened = fitted_scaler.transform(data_flattened)
             normalized_data = normalized_flattened.reshape(original_shape)
-            
-            # Handle any remaining NaN values
             normalized_data = np.nan_to_num(normalized_data, nan=0.0)
-            
-            print("✅ Normalization applied using ONLY training statistics")
-            print("🛡️  Data leakage prevented!")
+            print("Normalization applied successfully")
         else:
-            print("⚠️  No valid training data for normalization!")
+            print("Warning: No valid training data for normalization")
     
     # Create datasets using normalized data
     train_dataset = FlightDelayDataset(
@@ -490,25 +476,6 @@ def create_datasets(data, weather_data, adj_matrices, in_len, out_len,
     }
     
     return train_dataset, val_dataset, test_dataset, dataset_info
-
-# ===== Data Augmentation =====
-def mixup_data(x, y, alpha=0.5):
-    """Implement mixup data augmentation"""
-    if alpha > 0:
-        lam = np.random.beta(alpha, alpha)
-    else:
-        lam = 1
-
-    batch_size = x.size(0)
-    index = torch.randperm(batch_size).to(x.device)
-
-    mixed_x = lam * x + (1 - lam) * x[index, :]
-    y_a, y_b = y, y[index]
-    return mixed_x, y_a, y_b, lam
-
-def mixup_criterion(criterion, pred, y_a, y_b, lam):
-    """Calculate mixup loss"""
-    return lam * criterion(pred, y_a) + (1 - lam) * criterion(pred, y_b)
 
 # ===== Early Stopping Class =====
 class EarlyStopping:
@@ -667,81 +634,17 @@ def calculate_denormalized_mae(pred, target, scaler):
     if scaler is None:
         return calculate_mae(pred, target)
     
-    # Convert to numpy for denormalization
     pred_np = pred.detach().cpu().numpy()
     target_np = target.detach().cpu().numpy()
     
-    # Denormalize (only delay features, not weather/time features)
-    # Assume first 2 features are delays
     if pred_np.shape[-1] >= 2:
         pred_denorm = scaler.inverse_transform(pred_np.reshape(-1, pred_np.shape[-1]))
         target_denorm = scaler.inverse_transform(target_np.reshape(-1, target_np.shape[-1]))
-        
         pred_denorm = pred_denorm.reshape(pred_np.shape)
         target_denorm = target_denorm.reshape(target_np.shape)
-        
-        # Calculate MAE on denormalized data
-        mae_denorm = np.mean(np.abs(pred_denorm - target_denorm))
-        return mae_denorm
+        return np.mean(np.abs(pred_denorm - target_denorm))
     else:
         return calculate_mae(pred, target)
-
-def debug_data_batch(xb, yb, epoch, batch_idx, scaler=None):
-    """Debug a single batch to check for data issues"""
-    if batch_idx == 0 and epoch == 1:  # Only first batch of first epoch
-        print(f"\n🔍 DEBUGGING BATCH {batch_idx} EPOCH {epoch}")
-        print("-" * 60)
-        
-        # Check shapes
-        print(f"Input shape: {xb.shape}")
-        print(f"Target shape: {yb.shape}")
-        
-        # Check value ranges
-        print(f"Input range: [{xb.min():.4f}, {xb.max():.4f}]")
-        print(f"Target range: [{yb.min():.4f}, {yb.max():.4f}]")
-        
-        # Check for identical values between last input and target
-        if xb.shape[2] >= 12 and yb.shape[2] >= 1:
-            last_input_delay = xb[:, :, -1, :2]  # Last timestep of input, only delay features
-            first_target_delay = yb[:, :, 0, :2]  # First timestep of target
-            
-            if torch.allclose(last_input_delay, first_target_delay, atol=1e-6):
-                print("🚨 CRITICAL: Last input equals first target - MAJOR DATA LEAKAGE!")
-            elif torch.allclose(last_input_delay, first_target_delay, atol=1e-3):
-                print("⚠️ WARNING: Last input very similar to first target")
-            else:
-                print("✅ Last input != first target (good)")
-        
-        # Sample values
-        print(f"Sample input (airport 0, last timestep): {xb[0, 0, -1, :2]}")
-        print(f"Sample target (airport 0, first timestep): {yb[0, 0, 0, :2]}")
-        
-        # Check correlation between input and target
-        input_delay = xb[0, 0, :, :2].flatten()  # First sample, first airport, all timesteps, delay features
-        target_delay = yb[0, 0, :, :2].flatten()  # Corresponding target
-        
-        correlation = torch.corrcoef(torch.stack([input_delay, target_delay]))[0, 1]
-        print(f"Input-Target correlation: {correlation:.4f}")
-        
-        if correlation > 0.9:
-            print("🚨 CRITICAL: Very high correlation suggests data leakage!")
-        elif correlation > 0.7:
-            print("⚠️ WARNING: High correlation might indicate issues")
-        else:
-            print("✅ Reasonable correlation level")
-        
-        # Check if using normalized data and show real scale
-        if scaler is not None:
-            try:
-                # Try to denormalize a sample
-                sample_target = yb[0, 0, 0, :2].detach().cpu().numpy().reshape(1, -1)
-                denorm_sample = scaler.inverse_transform(sample_target)
-                print(f"Sample target (normalized): {sample_target[0]}")
-                print(f"Sample target (real minutes): {denorm_sample[0]}")
-            except Exception as e:
-                print(f"Could not denormalize sample: {e}")
-        
-        print("-" * 60)
 
 def test_error(pred, target):
     """Calculate comprehensive test metrics (MAE, RMSE, R2)"""
@@ -766,185 +669,11 @@ def test_error(pred, target):
     
     return mae, rmse, r2
 
-def detailed_test_evaluation_with_loader(model, test_loader, adj_matrices, device, args):
-    """
-    Comprehensive test evaluation using DataLoader
-    """
-    model.eval()
-    print("\n" + "="*80)
-    print("🧪 DETAILED TEST EVALUATION - Multiple Time Horizons")
-    print("="*80)
-    
-    outputs = []
-    labels = []
-    
-    with torch.no_grad():
-        for xb, yb in test_loader:
-            xb = xb.to(device)
-            yb = yb.to(device)
-            
-            # Forward pass
-            out = model(xb, adj_matrices)
-            
-            outputs.append(out.cpu().numpy())
-            labels.append(yb.cpu().numpy())
-    
-    # Concatenate all outputs and labels
-    yhat = np.concatenate(outputs, axis=0)  # [total_samples, airports, output_steps, 2]
-    ytrue = np.concatenate(labels, axis=0)   # [total_samples, airports, output_steps, 2]
-    
-    print(f"📊 Test predictions shape: {yhat.shape}")
-    print(f"📊 Test labels shape: {ytrue.shape}")
-    
-    # Test specific time horizons and delay types
-    test_steps = [3, 6, 12]  # 3, 6, and 12 steps ahead
-    delay_types = ['arrival', 'departure']
-    delay_indices = [0, 1]  # 0 for arrival, 1 for departure
-    
-    results = {}
-    
-    print(f"\n{'='*80}")
-    print("📈 PERFORMANCE BY TIME HORIZON AND DELAY TYPE")
-    print(f"{'='*80}")
-    
-    for step_idx, step in enumerate(test_steps):
-        if step <= yhat.shape[2]:  # Check if we have enough output steps
-            for delay_idx, delay_type in zip(delay_indices, delay_types):
-                # Extract predictions and labels for specific step and delay type
-                pred = yhat[:, :, step-1, delay_idx]  # step-1 because 0-indexed
-                true = ytrue[:, :, step-1, delay_idx]
-                
-                # Calculate metrics
-                mae, rmse, r2 = test_error(pred, true)
-                
-                # Store results
-                key = f"{step}_step_{delay_type}"
-                results[key] = {'MAE': mae, 'RMSE': rmse, 'R2': r2}
-                
-                # Print results
-                log = f'{step:2d} step ahead {delay_type:9s} delay, Test MAE: {mae:7.4f} min, Test R2: {r2:6.4f}, Test RMSE: {rmse:7.4f} min'
-                print(log)
-    
-    # Overall performance across all time steps
-    print(f"\n{'='*80}")
-    print("📊 OVERALL PERFORMANCE SUMMARY")
-    print(f"{'='*80}")
-    
-    for delay_idx, delay_type in zip(delay_indices, delay_types):
-        # Calculate average across all time steps
-        all_pred = yhat[:, :, :, delay_idx].flatten()
-        all_true = ytrue[:, :, :, delay_idx].flatten()
-        
-        mae, rmse, r2 = test_error(all_pred, all_true)
-        results[f"overall_{delay_type}"] = {'MAE': mae, 'RMSE': rmse, 'R2': r2}
-        
-        print(f"Overall {delay_type:9s} delay - MAE: {mae:7.4f} min, R2: {r2:6.4f}, RMSE: {rmse:7.4f} min")
-    
-    # Combined overall performance
-    all_pred_combined = yhat.flatten()
-    all_true_combined = ytrue.flatten()
-    mae_combined, rmse_combined, r2_combined = test_error(all_pred_combined, all_true_combined)
-    results['overall_combined'] = {'MAE': mae_combined, 'RMSE': rmse_combined, 'R2': r2_combined}
-    
-    print(f"Overall combined      - MAE: {mae_combined:7.4f} min, R2: {r2_combined:6.4f}, RMSE: {rmse_combined:7.4f} min")
-    print(f"{'='*80}")
-    
-    return results, yhat, ytrue
-
-def detailed_test_evaluation(model, test_data, test_labels, adj_matrices, device, args):
-    """
-    Comprehensive test evaluation similar to the STPN testing procedure
-    Tests specific time steps (3, 6, 12) for both arrival and departure delays
-    """
-    model.eval()
-    print("\n" + "="*80)
-    print("🧪 DETAILED TEST EVALUATION - Multiple Time Horizons")
-    print("="*80)
-    
-    outputs = []
-    labels = []
-    
-    with torch.no_grad():
-        # Process test data in batches
-        for i in range(0, test_data.size(0), args.batch):
-            end_idx = min(i + args.batch, test_data.size(0))
-            xb = test_data[i:end_idx]  # [batch, airports, time_steps, features]
-            yb = test_labels[i:end_idx]  # [batch, airports, output_steps, 2]
-            
-            # Forward pass
-            out = model(xb, adj_matrices)
-            
-            outputs.append(out.cpu().numpy())
-            labels.append(yb.cpu().numpy())
-    
-    # Concatenate all outputs and labels
-    yhat = np.concatenate(outputs, axis=0)  # [total_samples, airports, output_steps, 2]
-    ytrue = np.concatenate(labels, axis=0)   # [total_samples, airports, output_steps, 2]
-    
-    print(f"📊 Test predictions shape: {yhat.shape}")
-    print(f"📊 Test labels shape: {ytrue.shape}")
-    
-    # Test specific time horizons and delay types
-    test_steps = [3, 6, 12]  # 3, 6, and 12 steps ahead
-    delay_types = ['arrival', 'departure']
-    delay_indices = [0, 1]  # 0 for arrival, 1 for departure
-    
-    results = {}
-    
-    print(f"\n{'='*80}")
-    print("📈 PERFORMANCE BY TIME HORIZON AND DELAY TYPE")
-    print(f"{'='*80}")
-    
-    for step_idx, step in enumerate(test_steps):
-        if step <= yhat.shape[2]:  # Check if we have enough output steps
-            for delay_idx, delay_type in zip(delay_indices, delay_types):
-                # Extract predictions and labels for specific step and delay type
-                pred = yhat[:, :, step-1, delay_idx]  # step-1 because 0-indexed
-                true = ytrue[:, :, step-1, delay_idx]
-                
-                # Calculate metrics
-                mae, rmse, r2 = test_error(pred, true)
-                
-                # Store results
-                key = f"{step}_step_{delay_type}"
-                results[key] = {'MAE': mae, 'RMSE': rmse, 'R2': r2}
-                
-                # Print results
-                log = f'{step:2d} step ahead {delay_type:9s} delay, Test MAE: {mae:7.4f} min, Test R2: {r2:6.4f}, Test RMSE: {rmse:7.4f} min'
-                print(log)
-    
-    # Overall performance across all time steps
-    print(f"\n{'='*80}")
-    print("📊 OVERALL PERFORMANCE SUMMARY")
-    print(f"{'='*80}")
-    
-    for delay_idx, delay_type in zip(delay_indices, delay_types):
-        # Calculate average across all time steps
-        all_pred = yhat[:, :, :, delay_idx].flatten()
-        all_true = ytrue[:, :, :, delay_idx].flatten()
-        
-        mae, rmse, r2 = test_error(all_pred, all_true)
-        results[f"overall_{delay_type}"] = {'MAE': mae, 'RMSE': rmse, 'R2': r2}
-        
-        print(f"Overall {delay_type:9s} delay - MAE: {mae:7.4f} min, R2: {r2:6.4f}, RMSE: {rmse:7.4f} min")
-    
-    # Combined overall performance
-    all_pred_combined = yhat.flatten()
-    all_true_combined = ytrue.flatten()
-    mae_combined, rmse_combined, r2_combined = test_error(all_pred_combined, all_true_combined)
-    results['overall_combined'] = {'MAE': mae_combined, 'RMSE': rmse_combined, 'R2': r2_combined}
-    
-    print(f"Overall combined      - MAE: {mae_combined:7.4f} min, R2: {r2_combined:6.4f}, RMSE: {rmse_combined:7.4f} min")
-    print(f"{'='*80}")
-    
-    return results, yhat, ytrue
-
 def evaluate_model_with_loader(model, data_loader, adj_matrices, criterion, device, scaler=None):
     """Evaluate model using DataLoader"""
     model.eval()
     total_loss = 0.0
     total_mae = 0.0
-    total_mae_denorm = 0.0
     num_batches = 0
     
     with torch.no_grad():
@@ -955,10 +684,8 @@ def evaluate_model_with_loader(model, data_loader, adj_matrices, criterion, devi
             loss = criterion(out, yb)
             mae = calculate_mae(out, yb)
             
-            # Calculate denormalized MAE if scaler available
             if scaler is not None:
                 mae_denorm = calculate_denormalized_mae(out, yb, scaler)
-                total_mae_denorm += mae_denorm
             
             total_loss += loss.item()
             total_mae += mae
@@ -966,12 +693,7 @@ def evaluate_model_with_loader(model, data_loader, adj_matrices, criterion, devi
     
     avg_loss = total_loss / num_batches
     avg_mae = total_mae / num_batches
-    
-    if scaler is not None:
-        avg_mae_denorm = total_mae_denorm / num_batches
-        return avg_loss, avg_mae, avg_mae_denorm
-    else:
-        return avg_loss, avg_mae
+    return avg_loss, avg_mae
 
 def evaluate_model(model, data, labels, adj_matrices, criterion, batch_size, device):
     """Evaluate model on validation set"""
@@ -1018,13 +740,11 @@ def main():
     args = parser.parse_args()
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
-    print(f"🖥️  Using device: {device}")
-    
-    # Create output directory if it doesn't exist
+    print(f"Using device: {device}")
     os.makedirs(args.output_dir, exist_ok=True)
     
-    # Load real flight delay dataset
-    print(f"🌍 Loading {args.dataset} flight delay dataset...")
+    # Load dataset
+    print(f"Loading {args.dataset} flight delay dataset...")
     try:
         delay_data, weather_data, adj_matrices, scaler, num_airports, time_steps = load_flight_delay_data(
             dataset=args.dataset,
@@ -1034,10 +754,8 @@ def main():
             normalize=args.normalize
         )
         
-        print(f"✅ Successfully loaded real dataset!")
-        print(f"📊 Time steps: {time_steps}")
-        print(f"📊 Airports: {num_airports}")
-        print(f"📊 Delay features: {delay_data.shape[2]}")
+        print(f"Successfully loaded dataset")
+        print(f"Time steps: {time_steps}, Airports: {num_airports}, Features: {delay_data.shape[2]}")
         
         # Create memory-efficient datasets using sliding windows
         train_dataset, val_dataset, test_dataset, dataset_info = create_datasets(
@@ -1052,27 +770,21 @@ def main():
             add_time_features=True  # Add time-based features
         )
         
-        # Auto-detect input dimension from actual dataset
+        # Auto-detect input dimension
         if args.input_dim is None:
             args.input_dim = dataset_info['input_dim']
-            print(f"🔍 Auto-detected input dimension: {args.input_dim}")
+            print(f"Auto-detected input dimension: {args.input_dim}")
         
         # Get adjacency matrices for model
         adj_matrices = train_dataset.get_adj_matrices()
         
-        print(f"📊 Dataset Information:")
-        print(f"   Total time steps: {dataset_info['total_time_steps']}")
-        print(f"   Airports: {dataset_info['num_airports']}")
-        print(f"   Input features: {dataset_info['input_dim']} (includes weather + time features)")
-        print(f"   Training sequences: {dataset_info['train_size']}")
-        print(f"   Validation sequences: {dataset_info['val_size']}")
-        print(f"   Test sequences: {dataset_info['test_size']}")
+        print(f"Dataset info: {dataset_info['train_size']} train, {dataset_info['val_size']} val, {dataset_info['test_size']} test")
         
         use_real_data = True
         
     except Exception as e:
-        print(f"❌ Error loading dataset: {e}")
-        print(f"💡 Falling back to synthetic data for testing...")
+        print(f"Error loading dataset: {e}")
+        print(f"Falling back to synthetic data...")
         
         # Fallback to synthetic data if real data loading fails
         num_airports = 70
@@ -1119,17 +831,12 @@ def main():
     # Create DataLoaders for efficient training (only for real data) - OPTIMIZED
     if use_real_data:
         train_loader = DataLoader(train_dataset, batch_size=args.batch, shuffle=True, 
-                                 num_workers=0, pin_memory=False, drop_last=True)  # OPTIMIZED
+                                 num_workers=0, pin_memory=False, drop_last=True)
         val_loader = DataLoader(val_dataset, batch_size=args.batch*2, shuffle=False, 
-                               num_workers=0, pin_memory=False)  # Larger batch for validation
+                               num_workers=0, pin_memory=False)
         test_loader = DataLoader(test_dataset, batch_size=args.batch*2, shuffle=False, 
-                                num_workers=0, pin_memory=False)  # Larger batch for testing
-        
-        print(f"\n📊 DataLoader Information:")
-        print(f"   Train batches: {len(train_loader)}")
-        print(f"   Validation batches: {len(val_loader)}")
-        print(f"   Test batches: {len(test_loader)}")
-        print(f"   Batch size: {args.batch}")
+                                num_workers=0, pin_memory=False)
+        print(f"DataLoaders created: {len(train_loader)} train batches, {len(val_loader)} val batches")
     else:
         # For synthetic data, move to device
         train_data = train_data.to(device)
@@ -1144,7 +851,7 @@ def main():
         print(f"   Validation: {val_data.shape}")
         print(f"   Test: {test_data.shape}")
 
-    # Initialize model with dropout
+    # Model
     model = DSAFNet(
         input_dim=args.input_dim, 
         hidden_dim=args.hidden_dim, 
@@ -1153,43 +860,19 @@ def main():
         dropout_rate=args.dropout_rate
     ).to(device)
     
-    # Count model parameters
     total_params = sum(p.numel() for p in model.parameters())
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"\n🤖 Model Information:")
-    print(f"   Total parameters: {total_params:,}")
-    print(f"   Trainable parameters: {trainable_params:,}")
-    print(f"   Model size: {trainable_params * 4 / 1024 / 1024:.2f} MB (float32)")
+    print(f"Model parameters: {total_params:,}")
     
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.decay)
-    
     criterion = nn.MSELoss()
-    
-    # Initialize early stopping
-    early_stopping = EarlyStopping(
-        patience=args.early_stopping_patience, 
-        min_delta=0.0001, 
-        restore_best_weights=True
-    )
+    early_stopping = EarlyStopping(patience=args.early_stopping_patience, min_delta=0.0001)
 
-    # Initialize lists to store metrics for each epoch
-    training_metrics = {
-        'epoch': [],
-        'train_loss': [],
-        'val_loss': [],
-        'train_mae': [],
-        'val_mae': []
-    }
-
-    # Initialize time estimator
+    training_metrics = {'epoch': [], 'train_loss': [], 'val_loss': [], 'train_mae': [], 'val_mae': []}
     time_estimator = TrainingTimeEstimator(estimate_epochs=3, total_epochs=args.episode)
     time_estimator.start_training()
 
-    print("Start training with overfitting reduction techniques...")
-    print(f"🛡️  Dropout rate: {args.dropout_rate}")
-    print(f"🛡️  Weight decay: {args.decay}")
-    print(f"🛡️  Early stopping patience: {args.early_stopping_patience}")
-    print(f"🛡️  Using mixup: {args.use_mixup}")
+    print("Starting training...")
+    print(f"Dropout: {args.dropout_rate}, Weight decay: {args.decay}, Early stopping patience: {args.early_stopping_patience}")
     print("-" * 60)
     
     # Prepare data for training_c.py style training
@@ -1244,29 +927,16 @@ def main():
                 trainx = trainx.to(device)
                 trainy = trainy.to(device)
                 
-                # Debug first batch
-                if j == 0 and ep == 1:
-                    debug_data_batch(trainx, trainy, ep, j, scaler)
-                
-                # Forward pass
                 optimizer.zero_grad()
                 output = model(trainx, adj_matrices)
                 loss = criterion(output, trainy)
                 mae = calculate_mae(output, trainy)
                 
-                # Calculate denormalized MAE for display (real minutes)
                 if use_real_data and train_dataset.scaler is not None:
                     mae_denorm = calculate_denormalized_mae(output, trainy, train_dataset.scaler)
-                    # Debug output for first batch
-                    if j == 0 and ep == 1:
-                        print(f"   Training MAE (normalized): {mae:.6f}")
-                        print(f"   Training MAE (denormalized): {mae_denorm:.4f} min")
                 else:
                     mae_denorm = mae
-                    if j == 0 and ep == 1:
-                        print(f"   ⚠️ No scaler found for training data!")
                 
-                # Backward pass
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 3)  # Use 3 like training_c.py
                 optimizer.step()
@@ -1329,28 +999,15 @@ def main():
             # DENORMALIZE predictions and labels to get real minutes
             dataset_scaler = val_dataset.scaler
             if dataset_scaler is not None:
-                print(f"🔄 Denormalizing validation data using scaler...")
-                print(f"   Before denorm - Val pred range: [{yhat.min():.4f}, {yhat.max():.4f}]")
-                
-                # Denormalize only the delay features (first 2 channels)
                 original_shape = yhat.shape
-                # Reshape to [samples*airports*outlen, 2]
                 yhat_reshaped = yhat.reshape(-1, yhat.shape[-1])
                 val_label_reshaped = val_label.reshape(-1, val_label.shape[-1])
-                
-                # Denormalize using the scaler
                 yhat_denorm = dataset_scaler.inverse_transform(yhat_reshaped)
                 val_label_denorm = dataset_scaler.inverse_transform(val_label_reshaped)
-                
-                # Reshape back
                 yhat = yhat_denorm.reshape(original_shape)
                 val_label = val_label_denorm.reshape(original_shape)
-                
-                print(f"   After denorm - Val pred range: [{yhat.min():.4f}, {yhat.max():.4f}]")
-            else:
-                print("⚠️  Warning: No scaler found, validation metrics in normalized scale!")
             
-            # Calculate validation metrics like training_c.py (now in real minutes)
+            # Calculate validation metrics
             val_mae_list = []
             val_r2_list = []
             val_rmse_list = []
@@ -1414,45 +1071,38 @@ def main():
             print(f"📈 Best validation loss: {early_stopping.best_loss:.6f}")
             break
     
-    # Load best model like training_c.py
     if best_model is not None:
         model.load_state_dict(best_model)
-        print("🎯 Loaded best model weights")
+        print("Loaded best model weights")
     
-    # Finish training and get final stats
     final_stats = time_estimator.finish_training()
     
-    # ===== SAVE MODEL AND TRAINING RESULTS =====
-    print(f"\n🔍 Model stopped at epoch {len(training_metrics['epoch'])}")
+    print(f"\nTraining stopped at epoch {len(training_metrics['epoch'])}")
     if early_stopping.early_stop:
-        print(f"🎯 Using best model weights (validation loss: {early_stopping.best_loss:.6f})")
+        print(f"Best validation loss: {early_stopping.best_loss:.6f}")
     
-    # Compare final training and validation performance
     final_train_loss = training_metrics['train_loss'][-1]
     final_val_loss = training_metrics['val_loss'][-1]
     final_train_mae = training_metrics['train_mae'][-1]
     final_val_mae = training_metrics['val_mae'][-1]
     
-    print(f"\n📈 Final Training Performance:")
-    print(f"   Train Loss: {final_train_loss:.6f} | Val Loss: {final_val_loss:.6f}")
-    print(f"   Train MAE:  {final_train_mae:.4f} min | Val MAE:  {final_val_mae:.4f} min")
+    print(f"\nFinal Performance:")
+    print(f"  Train Loss: {final_train_loss:.6f} | Val Loss: {final_val_loss:.6f}")
+    print(f"  Train MAE:  {final_train_mae:.4f} min | Val MAE:  {final_val_mae:.4f} min")
     
-    # Training-validation gap analysis
     train_val_gap = final_val_loss - final_train_loss
-    
-    print(f"\n🔍 Training Analysis:")
-    print(f"   Training-Validation Gap: {train_val_gap:.6f}")
+    print(f"\nTraining Analysis:")
+    print(f"  Train-Val Gap: {train_val_gap:.6f}")
     
     if train_val_gap < 0.01:
-        print("   ✅ Excellent training stability - minimal train/val gap")
+        print("  Status: Excellent stability")
     elif train_val_gap < 0.05:
-        print("   ⚠️  Moderate training stability")
+        print("  Status: Moderate stability")
     else:
-        print("   ❌ Poor training stability - high train/val gap")
+        print("  Status: Needs improvement")
     
     print("="*60)
     
-    # Store training results (no test results)
     training_results = {
         'final_train_loss': final_train_loss,
         'final_val_loss': final_val_loss,
@@ -1471,13 +1121,12 @@ def main():
     df = pd.DataFrame(training_metrics)
     excel_path = os.path.join(args.output_dir, 'training_metrics_regularized.xlsx')
     df.to_excel(excel_path, index=False)
-    print(f"\n📁 Training metrics saved to: {excel_path}")
+    print(f"Training metrics saved to: {excel_path}")
     
-    # Save training results to Excel file
     results_df = pd.DataFrame([training_results])
     results_excel_path = os.path.join(args.output_dir, 'training_results_regularized.xlsx')
     results_df.to_excel(results_excel_path, index=False)
-    print(f"📁 Training results saved to: {results_excel_path}")
+    print(f"Training results saved to: {results_excel_path}")
 
     # Save training time statistics
     if final_stats:
@@ -1491,25 +1140,23 @@ def main():
         }])
         time_stats_path = os.path.join(args.output_dir, 'training_time_statistics_regularized.xlsx')
         time_stats.to_excel(time_stats_path, index=False)
-        print(f"📁 Training time statistics saved to: {time_stats_path}")
+        print(f"Training time statistics saved to: {time_stats_path}")
 
     # Save model
     model_path = os.path.join(args.output_dir, "dsafnet_flight_delay_regularized.pth")
     torch.save(model.state_dict(), model_path)
-    print(f"💾 Model saved to: {model_path}")
+    print(f"Model saved to: {model_path}")
     
-    print("\n" + "🎉" + "="*78 + "🎉")
-    print("🎊 TRAINING COMPLETE! 🎊")
-    print("🎉" + "="*78 + "🎉")
-    
-    # Final summary
-    print(f"📊 TRAINING SUMMARY:")
-    print(f"   • Training stopped at epoch: {len(training_metrics['epoch'])}")
-    print(f"   • Early stopping triggered: {'Yes' if early_stopping.early_stop else 'No'}")
-    print(f"   • Final Train MAE: {final_train_mae:.4f} min")
-    print(f"   • Final Val MAE: {final_val_mae:.4f} min")
-    print(f"   • Training-Validation Gap: {train_val_gap:.6f}")
-    print(f"\n💡 To test the model, run: python dsafnetcopy_test.py --dataset {args.dataset}")
+    print("\n" + "="*80)
+    print("TRAINING COMPLETE")
+    print("="*80)
+    print(f"Training Summary:")
+    print(f"  Epochs trained: {len(training_metrics['epoch'])}")
+    print(f"  Early stopping: {'Yes' if early_stopping.early_stop else 'No'}")
+    print(f"  Final Train MAE: {final_train_mae:.4f} min")
+    print(f"  Final Val MAE: {final_val_mae:.4f} min")
+    print(f"  Train-Val Gap: {train_val_gap:.6f}")
+    print(f"\nTo test the model: python dsafnetcopy_test.py --dataset {args.dataset}")
     print("="*80)
 
 if __name__ == "__main__":

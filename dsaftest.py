@@ -18,7 +18,8 @@ from baseline_methods import test_error, StandardScaler
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Import DSAFNet class
-from DSAFnet import DSAFNet
+#from DSAFnet import DSAFNet
+from DSAFnet_optimized import OptimizedDSAFNet
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--device', type=str, default='cuda:0', help='device to run on')
@@ -72,11 +73,11 @@ def main():
     
     # Load pre-trained model and move to device
     # Use the actual input dimension from the data (should be 2 after reduction)
-    model = DSAFNet(input_dim=actual_input_dim, hidden_dim=64, output_steps=args.out_len, num_graphs=len(supports)).to(device)
+    model = OptimizedDSAFNet(input_dim=actual_input_dim, hidden_dim=64, output_steps=args.out_len, num_graphs=len(supports)).to(device)
     
     # Try to load the model state dict
     try:
-        model.load_state_dict(torch.load("D:\\flight delay\\stpn paper\\STPN-main\\results\\dsafnet_US.pth", map_location=device))
+        model.load_state_dict(torch.load("D:\\flight delay\\stpn paper\\STPN-main\\results\\optimized_dsafnet_US.pth", map_location=device))
         print("Successfully loaded model weights")
     except Exception as e:
         print(f"Error loading model weights: {e}")

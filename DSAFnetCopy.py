@@ -1004,7 +1004,7 @@ def main():
     parser.add_argument("--inlen", type=int, default=12)
     parser.add_argument("--outlen", type=int, default=12)
     parser.add_argument("--batch", type=int, default=32)
-    parser.add_argument("--episode", type=int, default=50)
+    parser.add_argument("--episode", type=int, default=7)
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--decay", type=float, default=1e-4)  # Increased weight decay
     parser.add_argument("--input_dim", type=int, default=None, help="Input dimension (will be auto-detected)")
@@ -1254,13 +1254,25 @@ def main():
                 loss = criterion(output, trainy)
                 mae = calculate_mae(output, trainy)
                 
+                # Calculate denormalized MAE for display (real minutes)
+                if use_real_data and train_dataset.scaler is not None:
+                    mae_denorm = calculate_denormalized_mae(output, trainy, train_dataset.scaler)
+                    # Debug output for first batch
+                    if j == 0 and ep == 1:
+                        print(f"   Training MAE (normalized): {mae:.6f}")
+                        print(f"   Training MAE (denormalized): {mae_denorm:.4f} min")
+                else:
+                    mae_denorm = mae
+                    if j == 0 and ep == 1:
+                        print(f"   ⚠️ No scaler found for training data!")
+                
                 # Backward pass
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 3)  # Use 3 like training_c.py
                 optimizer.step()
                 
                 epoch_train_loss += loss.item()
-                epoch_train_mae += mae
+                epoch_train_mae += mae_denorm  # Store denormalized MAE
                 num_train_batches += 1
         else:
             # Use tensor-based training for synthetic data
@@ -1314,28 +1326,52 @@ def main():
             yhat = np.concatenate(outputs)  # [samples, airports, outlen, 2]
             val_label = np.concatenate(labels)  # [samples, airports, outlen, 2]
             
-            # Calculate validation metrics like training_c.py
+            # DENORMALIZE predictions and labels to get real minutes
+            dataset_scaler = val_dataset.scaler
+            if dataset_scaler is not None:
+                print(f"🔄 Denormalizing validation data using scaler...")
+                print(f"   Before denorm - Val pred range: [{yhat.min():.4f}, {yhat.max():.4f}]")
+                
+                # Denormalize only the delay features (first 2 channels)
+                original_shape = yhat.shape
+                # Reshape to [samples*airports*outlen, 2]
+                yhat_reshaped = yhat.reshape(-1, yhat.shape[-1])
+                val_label_reshaped = val_label.reshape(-1, val_label.shape[-1])
+                
+                # Denormalize using the scaler
+                yhat_denorm = dataset_scaler.inverse_transform(yhat_reshaped)
+                val_label_denorm = dataset_scaler.inverse_transform(val_label_reshaped)
+                
+                # Reshape back
+                yhat = yhat_denorm.reshape(original_shape)
+                val_label = val_label_denorm.reshape(original_shape)
+                
+                print(f"   After denorm - Val pred range: [{yhat.min():.4f}, {yhat.max():.4f}]")
+            else:
+                print("⚠️  Warning: No scaler found, validation metrics in normalized scale!")
+            
+            # Calculate validation metrics like training_c.py (now in real minutes)
             val_mae_list = []
             val_r2_list = []
             val_rmse_list = []
             for i in range(args.outlen):
                 val_metrics = test_error(yhat[:, :, i, :], val_label[:, :, i, :])
                 if val_metrics:
-                    val_mae_list.append(val_metrics[0])  # MAE
-                    val_rmse_list.append(val_metrics[1])  # RMSE
+                    val_mae_list.append(val_metrics[0])  # MAE in real minutes
+                    val_rmse_list.append(val_metrics[1])  # RMSE in real minutes
                     val_r2_list.append(val_metrics[2])  # R2
             
             val_mae = np.mean(val_mae_list) if val_mae_list else float('inf')
             val_rmse = np.mean(val_rmse_list) if val_rmse_list else float('inf')
             val_r2 = np.mean(val_r2_list) if val_r2_list else 0.0
-            val_loss = val_mae  # Use MAE as validation loss for consistency with training_c.py
-            val_mae_denorm = val_mae  # Already in denormalized scale
+            val_loss = val_mae  # Use MAE as validation loss (now in real minutes)
+            val_mae_denorm = val_mae  # Already denormalized to real minutes
             
             # Store in MAE_list like training_c.py
             MAE_list.append(val_mae)
             
-            # Print validation results like training_c.py
-            log = 'On average over all horizons, Test MAE: {:.4f}, Test R2: {:.4f}, Test RMSE: {:.4f}'
+            # Print validation results like training_c.py (now in REAL MINUTES)
+            log = 'On average over all horizons, Val MAE: {:.4f} min, Val R2: {:.4f}, Val RMSE: {:.4f} min'
             print(log.format(val_mae, val_r2, val_rmse))
         else:
             val_loss, val_mae = evaluate_model(model, val_data, val_labels, adj_matrices, criterion, args.batch, device)
@@ -1365,10 +1401,10 @@ def main():
         # Enhanced progress reporting - simplified like training_c.py
         improvement_indicator = "✅" if (use_real_data and val_mae == min(MAE_list)) or (not use_real_data and val_mae < best_val_loss) else "  "
         
-        # Display progress
+        # Display progress - all metrics now in REAL MINUTES (denormalized)
         if val_mae_denorm is not None:
-            print(f"Epoch {ep:3d} {improvement_indicator} | Train Loss: {avg_train_loss:.6f} | Val Loss: {val_loss:.6f} | "
-                  f"Train MAE: {avg_train_mae:.6f} | Val MAE: {val_mae:.4f} (minutes)")
+            print(f"Epoch {ep:3d} {improvement_indicator} | Train Loss: {avg_train_loss:.6f} | Val Loss: {val_loss:.4f} min | "
+                  f"Train MAE: {avg_train_mae:.4f} min | Val MAE: {val_mae:.4f} min")
         else:
             print(f"Epoch {ep:3d} {improvement_indicator} | Train Loss: {avg_train_loss:.6f} | Val Loss: {val_loss:.6f} | "
                   f"Train MAE: {avg_train_mae:.6f} | Val MAE: {val_mae:.6f}")
@@ -1386,56 +1422,27 @@ def main():
     # Finish training and get final stats
     final_stats = time_estimator.finish_training()
     
-    # ===== COMPREHENSIVE TEST EVALUATION =====
+    # ===== SAVE MODEL AND TRAINING RESULTS =====
     print(f"\n🔍 Model stopped at epoch {len(training_metrics['epoch'])}")
     if early_stopping.early_stop:
         print(f"🎯 Using best model weights (validation loss: {early_stopping.best_loss:.6f})")
     
-    # Perform detailed test evaluation with multiple time horizons
-    if use_real_data:
-        detailed_results, test_predictions, test_true = detailed_test_evaluation_with_loader(
-            model, test_loader, adj_matrices, device, args
-        )
-    else:
-        detailed_results, test_predictions, test_true = detailed_test_evaluation(
-            model, test_data, test_labels, adj_matrices, device, args
-        )
-    
-    # Original simple test evaluation for comparison
-    print("\n" + "="*60)
-    print("🧪 BASIC TEST EVALUATION (For Comparison)")
-    print("="*60)
-    
-    if use_real_data:
-        test_loss, test_mae = evaluate_model_with_loader(model, test_loader, adj_matrices, criterion, device)
-    else:
-        test_loss, test_mae = evaluate_model(model, test_data, test_labels, adj_matrices, criterion, args.batch, device)
-    
-    print(f"📊 Basic Test Set Results:")
-    print(f"   Test Loss (MSE): {test_loss:.6f}")
-    print(f"   Test MAE: {test_mae:.6f}")
-    
-    # Compare with final training and validation performance
+    # Compare final training and validation performance
     final_train_loss = training_metrics['train_loss'][-1]
     final_val_loss = training_metrics['val_loss'][-1]
     final_train_mae = training_metrics['train_mae'][-1]
     final_val_mae = training_metrics['val_mae'][-1]
     
-    print(f"\n📈 Final Performance Comparison:")
-    print(f"   Train Loss: {final_train_loss:.6f} | Val Loss: {final_val_loss:.6f} | Test Loss: {test_loss:.6f}")
-    print(f"   Train MAE:  {final_train_mae:.6f} | Val MAE:  {final_val_mae:.6f} | Test MAE:  {test_mae:.6f}")
+    print(f"\n📈 Final Training Performance:")
+    print(f"   Train Loss: {final_train_loss:.6f} | Val Loss: {final_val_loss:.6f}")
+    print(f"   Train MAE:  {final_train_mae:.4f} min | Val MAE:  {final_val_mae:.4f} min")
     
-    # Enhanced overfitting analysis
-    overfitting_gap = test_loss - final_train_loss
-    generalization_gap = test_loss - final_val_loss
+    # Training-validation gap analysis
     train_val_gap = final_val_loss - final_train_loss
     
-    print(f"\n🔍 Enhanced Model Analysis:")
+    print(f"\n🔍 Training Analysis:")
     print(f"   Training-Validation Gap: {train_val_gap:.6f}")
-    print(f"   Overfitting Gap (Test - Train): {overfitting_gap:.6f}")
-    print(f"   Generalization Gap (Test - Val): {generalization_gap:.6f}")
     
-    # Improved overfitting assessment
     if train_val_gap < 0.01:
         print("   ✅ Excellent training stability - minimal train/val gap")
     elif train_val_gap < 0.05:
@@ -1443,25 +1450,14 @@ def main():
     else:
         print("   ❌ Poor training stability - high train/val gap")
     
-    if generalization_gap < 0.01:
-        print("   ✅ Excellent generalization - test performance close to validation")
-    elif generalization_gap < 0.05:
-        print("   ⚠️  Good generalization with small gap")
-    else:
-        print("   ❌ Poor generalization - significant test/validation gap")
-    
     print("="*60)
     
-    # Combine all results
-    test_results = {
-        'basic_test_loss': test_loss,
-        'basic_test_mae': test_mae,
+    # Store training results (no test results)
+    training_results = {
         'final_train_loss': final_train_loss,
         'final_val_loss': final_val_loss,
         'final_train_mae': final_train_mae,
         'final_val_mae': final_val_mae,
-        'overfitting_gap': overfitting_gap,
-        'generalization_gap': generalization_gap,
         'train_val_gap': train_val_gap,
         'early_stopped': early_stopping.early_stop,
         'best_val_loss': early_stopping.best_loss,
@@ -1471,23 +1467,17 @@ def main():
         'used_mixup': args.use_mixup
     }
     
-    # Add detailed results to test_results
-    for key, metrics in detailed_results.items():
-        test_results[f'{key}_MAE'] = metrics['MAE']
-        test_results[f'{key}_RMSE'] = metrics['RMSE']
-        test_results[f'{key}_R2'] = metrics['R2']
-    
     # Save metrics to Excel file
     df = pd.DataFrame(training_metrics)
     excel_path = os.path.join(args.output_dir, 'training_metrics_regularized.xlsx')
     df.to_excel(excel_path, index=False)
-    print(f"📁 Training metrics saved to: {excel_path}")
+    print(f"\n📁 Training metrics saved to: {excel_path}")
     
-    # Save test results to Excel file
-    test_df = pd.DataFrame([test_results])
-    test_excel_path = os.path.join(args.output_dir, 'test_results_regularized.xlsx')
-    test_df.to_excel(test_excel_path, index=False)
-    print(f"📁 Test results saved to: {test_excel_path}")
+    # Save training results to Excel file
+    results_df = pd.DataFrame([training_results])
+    results_excel_path = os.path.join(args.output_dir, 'training_results_regularized.xlsx')
+    results_df.to_excel(results_excel_path, index=False)
+    print(f"📁 Training results saved to: {results_excel_path}")
 
     # Save training time statistics
     if final_stats:
@@ -1509,25 +1499,17 @@ def main():
     print(f"💾 Model saved to: {model_path}")
     
     print("\n" + "🎉" + "="*78 + "🎉")
-    print("🎊 REGULARIZED TRAINING AND EVALUATION COMPLETE! 🎊")
+    print("🎊 TRAINING COMPLETE! 🎊")
     print("🎉" + "="*78 + "🎉")
     
-    # Enhanced results summary
-    print(f"📊 KEY PERFORMANCE METRICS (with overfitting reduction):")
+    # Final summary
+    print(f"📊 TRAINING SUMMARY:")
     print(f"   • Training stopped at epoch: {len(training_metrics['epoch'])}")
     print(f"   • Early stopping triggered: {'Yes' if early_stopping.early_stop else 'No'}")
-    print(f"   • Basic Test MAE: {test_mae:.6f}")
+    print(f"   • Final Train MAE: {final_train_mae:.4f} min")
+    print(f"   • Final Val MAE: {final_val_mae:.4f} min")
     print(f"   • Training-Validation Gap: {train_val_gap:.6f}")
-    print(f"   • Generalization Gap: {generalization_gap:.6f}")
-    
-    if '12_step_arrival' in detailed_results:
-        print(f"   • 12-step Arrival Delay MAE: {detailed_results['12_step_arrival']['MAE']:.4f} min")
-        print(f"   • 12-step Departure Delay MAE: {detailed_results['12_step_departure']['MAE']:.4f} min")
-    
-    if 'overall_combined' in detailed_results:
-        print(f"   • Overall Combined MAE: {detailed_results['overall_combined']['MAE']:.4f} min")
-        print(f"   • Overall Combined R²: {detailed_results['overall_combined']['R2']:.4f}")
-    
+    print(f"\n💡 To test the model, run: python dsafnetcopy_test.py --dataset {args.dataset}")
     print("="*80)
 
 if __name__ == "__main__":

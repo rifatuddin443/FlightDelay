@@ -55,6 +55,11 @@ class OptimizedSpatialAttentionStream(nn.Module):
         x_emb = self.embedding(x_reshaped)  # [batch*time, airports, hidden]
         x_emb = x_emb.transpose(0, 1)  # [airports, batch*time, hidden]
         
+        # ensure attention module is on the same device as inputs
+        try:
+            self.attention.to(x_emb.device)
+        except Exception:
+            pass
         out, _ = self.attention(x_emb, x_emb, x_emb)
         out = out.transpose(0, 1)  # [batch*time, airports, hidden]
         
@@ -83,6 +88,11 @@ class OptimizedTemporalAttentionStream(nn.Module):
         x_emb = self.embedding(x_reshaped)  # [batch*airports, time, hidden]
         x_emb = x_emb.transpose(0, 1)  # [time, batch*airports, hidden]
         
+        # ensure attention module is on the same device as inputs
+        try:
+            self.attention.to(x_emb.device)
+        except Exception:
+            pass
         out, _ = self.attention(x_emb, x_emb, x_emb)
         out = out.transpose(0, 1)  # [batch*airports, time, hidden]
         
@@ -108,6 +118,11 @@ class OptimizedContextualCrossAttention(nn.Module):
         if self.cross_attn is None:
             # default to native MultiheadAttention
             self.cross_attn = nn.MultiheadAttention(self._hidden_dim, 1, batch_first=True)
+        # ensure cross_attn parameters/buffers are on the same device as inputs
+        try:
+            self.cross_attn.to(spatial.device)
+        except Exception:
+            pass
         fusion, _ = self.cross_attn(spatial, temporal, temporal)
         cat = torch.cat([spatial, fusion], dim=-1)
         gate_w = self.gate(cat)
@@ -185,6 +200,7 @@ class OptimizedDSAFNet(nn.Module):
         # Transform to match expected output format
         out = out.permute(0, 3, 1, 2)  # [batch, 2, airports, output_steps]
         
+
         return out
 
 # ===== Optimized Data Loader =====
@@ -355,13 +371,13 @@ def main():
     parser.add_argument('--in_len', type=int, default=12, help='input time series length')
     parser.add_argument('--out_len', type=int, default=12, help='output time series length')
     parser.add_argument('--batch', type=int, default=64, help='training batch size')
-    parser.add_argument('--episode', type=int, default=10, help='training episodes')
+    parser.add_argument('--episode', type=int, default=7, help='training episodes')
     parser.add_argument('--period', type=int, default=36, help='periodic for temporal embedding')
     parser.add_argument('--hidden_dim', type=int, default=64, help='hidden dimension')
     parser.add_argument('--num_workers', type=int, default=4, help='number of data loader workers')
     
     # DP parameters
-    parser.add_argument('--dp', default=True, action='store_true', help='enable differential privacy')
+    parser.add_argument('--dp', default=False, action='store_true', help='enable differential privacy')
     parser.add_argument('--target_epsilon', type=float, default=4.0, help='target epsilon')
     parser.add_argument('--target_delta', type=float, default=1e-5, help='delta for DP')
     parser.add_argument('--noise_multiplier', type=float, default=1.5, help='noise multiplier')

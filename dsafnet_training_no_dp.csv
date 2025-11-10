@@ -1,0 +1,32 @@
+epoch,training_loss,validation_loss,validation_mae,validation_r2,validation_rmse,epsilon
+# Training Arguments
+# device,cuda:0
+# data,US
+# train_val_ratio,"[0.7, 0.1]"
+# in_channels,2
+# out_channels,2
+# dropout,0
+# support_len,3
+# decay,1e-05
+# lr,0.0005
+# in_len,12
+# out_len,12
+# batch,64
+# episode,25
+# period,36
+# hidden_dim,64
+# num_workers,4
+# val_frequency,5
+# dp,False
+# target_epsilon,1.0
+# target_delta,1e-05
+# noise_multiplier,1.5
+# max_grad_norm,1.5
+# output_dir,./results
+# Start of Training Data
+epoch,training_loss,validation_loss,validation_mae,validation_r2,validation_rmse,epsilon
+1,0.9021497229827252,0.8976489918135288,7.245462292137361,0.06097282373054949,9.496172136856417,No DP
+2,0.8918235479679019,0.8962744911804699,7.222908017038278,0.0639939617750451,9.479042234092335,No DP
+3,0.8898289691129583,0.8648588572521896,6.695535943944485,0.12778232196950046,9.153259954612007,No DP
+4,0.8887792659054776,0.8483447516314544,6.4952451143488235,0.16193819087110775,8.974332347218086,No DP
+5,0.888305083712403,0.8702474754723718,6.826692432697477,0.11838656897136268,9.201429581541685,No DP

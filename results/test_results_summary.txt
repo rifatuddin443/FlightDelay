@@ -2,13 +2,13 @@
 DSAFNet Test Results Summary
 ================================================================================
 
-dataset: US
+dataset: China
 model_path: ./results/dsafnet_flight_delay_regularized.pth
-test_samples: 11834
-overall_mae: 6.7299485206604
-overall_rmse: 9.389650344848633
-overall_r2: 0.16001105308532715
-arrival_mae: 7.958836078643799
-departure_mae: 5.5010576248168945
+test_samples: 4118
+overall_mae: 6.552605152130127
+overall_rmse: 9.72431468963623
+overall_r2: 0.185896635055542
+arrival_mae: 6.593199253082275
+departure_mae: 6.51201057434082
 
 ================================================================================

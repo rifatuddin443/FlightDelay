@@ -19,7 +19,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Import DSAFNet class
 #from DSAFnet import DSAFNet
-from DSAFnet_optimized import OptimizedDSAFNet
+from dsafnetfullfixed import OptimizedDSAFNet
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--device', type=str, default='cuda:0', help='device to run on')

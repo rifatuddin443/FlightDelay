@@ -721,13 +721,13 @@ def evaluate_model(model, data, labels, adj_matrices, criterion, batch_size, dev
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument("--dataset", type=str, default="US", choices=["US", "China"], help="Choose dataset: US or China")
+    parser.add_argument("--dataset", type=str, default="China", choices=["US", "China"], help="Choose dataset: US or China")
     parser.add_argument("--data_dir", type=str, default=".", help="Directory containing udata and cdata folders")
     parser.add_argument("--inlen", type=int, default=12)
     parser.add_argument("--outlen", type=int, default=12)
     parser.add_argument("--batch", type=int, default=32)
-    parser.add_argument("--episode", type=int, default=7)
-    parser.add_argument("--lr", type=float, default=0.001)
+    parser.add_argument("--episode", type=int, default=50)
+    parser.add_argument("--lr", type=float, default=0.0001)
     parser.add_argument("--decay", type=float, default=1e-4)  # Increased weight decay
     parser.add_argument("--input_dim", type=int, default=None, help="Input dimension (will be auto-detected)")
     parser.add_argument("--hidden_dim", type=int, default=32)

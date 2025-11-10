@@ -36,68 +36,76 @@ torch.backends.cudnn.deterministic = False
 
 # ===== OPTIMIZED DSAFNet Model =====
 class OptimizedSpatialAttentionStream(nn.Module):
-    """Vectorized spatial attention - no loops"""
+    """DP-compatible spatial attention - processes samples separately"""
     def __init__(self, input_dim=6, hidden_dim=64, attention_class=None):
         super().__init__()
         self.embedding = nn.Linear(input_dim, hidden_dim)
         # Use DP-compatible attention if provided
         if attention_class is not None:
-            self.attention = attention_class(hidden_dim, 1, batch_first=False)
+            self.attention = attention_class(hidden_dim, 1, batch_first=True)
         else:
-            self.attention = nn.MultiheadAttention(hidden_dim, 1, batch_first=False)
+            self.attention = nn.MultiheadAttention(hidden_dim, 1, batch_first=True)
     
     def forward(self, x):
         # x: [batch, airports, time_steps, features]
         batch_size, airports, time_steps, features = x.shape
         
-        # Process all time steps at once by reshaping
-        x_reshaped = x.permute(0, 2, 1, 3).reshape(batch_size * time_steps, airports, features)
-        x_emb = self.embedding(x_reshaped)  # [batch*time, airports, hidden]
-        x_emb = x_emb.transpose(0, 1)  # [airports, batch*time, hidden]
+        # Process each sample separately to maintain DP compatibility
+        outputs = []
+        for i in range(batch_size):
+            # x[i]: [airports, time_steps, features]
+            x_sample = x[i]
+            
+            # Process all time steps for this sample
+            x_reshaped = x_sample.transpose(0, 1)  # [time_steps, airports, features]
+            x_emb = self.embedding(x_reshaped)  # [time_steps, airports, hidden]
+            
+            # Reshape to [airports, time_steps, hidden] for attention
+            x_emb = x_emb.transpose(0, 1)  # [airports, time_steps, hidden]
+            
+            out, _ = self.attention(x_emb, x_emb, x_emb)  # [airports, time_steps, hidden]
+            
+            outputs.append(out.unsqueeze(0))  # [1, airports, time_steps, hidden]
         
-        # ensure attention module is on the same device as inputs
-        try:
-            self.attention.to(x_emb.device)
-        except Exception:
-            pass
-        out, _ = self.attention(x_emb, x_emb, x_emb)
-        out = out.transpose(0, 1)  # [batch*time, airports, hidden]
-        
-        # Reshape back
-        out = out.view(batch_size, time_steps, airports, -1)
-        out = out.permute(0, 2, 1, 3)  # [batch, airports, time_steps, hidden]
+        # Concatenate all samples
+        out = torch.cat(outputs, dim=0)  # [batch, airports, time_steps, hidden]
         
         return out
 
 class OptimizedTemporalAttentionStream(nn.Module):
-    """Vectorized temporal attention - no loops"""
+    """DP-compatible temporal attention - processes samples separately"""
     def __init__(self, input_dim=6, hidden_dim=64, attention_class=None):
         super().__init__()
         self.embedding = nn.Linear(input_dim, hidden_dim)
         if attention_class is not None:
-            self.attention = attention_class(hidden_dim, 1, batch_first=False)
+            self.attention = attention_class(hidden_dim, 1, batch_first=True)
         else:
-            self.attention = nn.MultiheadAttention(hidden_dim, 1, batch_first=False)
+            self.attention = nn.MultiheadAttention(hidden_dim, 1, batch_first=True)
     
     def forward(self, x):
         # x: [batch, airports, time_steps, features]
         batch_size, airports, time_steps, features = x.shape
         
-        # Process all airports at once by reshaping
-        x_reshaped = x.reshape(batch_size * airports, time_steps, features)
-        x_emb = self.embedding(x_reshaped)  # [batch*airports, time, hidden]
-        x_emb = x_emb.transpose(0, 1)  # [time, batch*airports, hidden]
+        # Process each sample separately to maintain DP compatibility
+        outputs = []
+        for i in range(batch_size):
+            # x[i]: [airports, time_steps, features]
+            x_sample = x[i]
+            
+            # Process all airports for this sample
+            x_emb = self.embedding(x_sample)  # [airports, time_steps, hidden]
+            
+            # Reshape to [time_steps, airports, hidden] for attention
+            x_emb = x_emb.transpose(0, 1)  # [time_steps, airports, hidden]
+            
+            out, _ = self.attention(x_emb, x_emb, x_emb)  # [time_steps, airports, hidden]
+            
+            # Transpose back
+            out = out.transpose(0, 1)  # [airports, time_steps, hidden]
+            outputs.append(out.unsqueeze(0))  # [1, airports, time_steps, hidden]
         
-        # ensure attention module is on the same device as inputs
-        try:
-            self.attention.to(x_emb.device)
-        except Exception:
-            pass
-        out, _ = self.attention(x_emb, x_emb, x_emb)
-        out = out.transpose(0, 1)  # [batch*airports, time, hidden]
-        
-        # Reshape back
-        out = out.view(batch_size, airports, time_steps, -1)
+        # Concatenate all samples
+        out = torch.cat(outputs, dim=0)  # [batch, airports, time_steps, hidden]
         
         return out
 
@@ -119,10 +127,6 @@ class OptimizedContextualCrossAttention(nn.Module):
             # default to native MultiheadAttention
             self.cross_attn = nn.MultiheadAttention(self._hidden_dim, 1, batch_first=True)
         # ensure cross_attn parameters/buffers are on the same device as inputs
-        try:
-            self.cross_attn.to(spatial.device)
-        except Exception:
-            pass
         fusion, _ = self.cross_attn(spatial, temporal, temporal)
         cat = torch.cat([spatial, fusion], dim=-1)
         gate_w = self.gate(cat)
@@ -132,10 +136,77 @@ class SimpleGraphEncoder(nn.Module):
     def __init__(self, num_graphs=3):
         super().__init__()
         self.graph_weights = nn.Parameter(torch.ones(num_graphs) / num_graphs)
+        self._cached_adj = None
     
-    def forward(self, features, adj_matrices):
-        combined_adj = sum(w * adj for w, adj in zip(self.graph_weights, adj_matrices))
-        return torch.matmul(combined_adj, features)
+    def set_adjacency(self, adj_matrices):
+        """Cache adjacency to support modules that cannot pass extra args."""
+        self._cached_adj = adj_matrices
+
+    def forward(self, features, adj_matrices=None):
+        if adj_matrices is None:
+            adj_matrices = self._cached_adj
+        if adj_matrices is None:
+            return features
+
+        weights = self.graph_weights
+        # Ensure weights are reshaped correctly for broadcasting
+        # weights: [num_graphs] -> [num_graphs, 1, 1] for proper broadcasting
+        weights = weights.view(-1, 1, 1)
+
+        if isinstance(adj_matrices, torch.Tensor):
+            weights = weights.to(adj_matrices.device)
+            if adj_matrices.dim() == 4:
+                # adj_matrices: [batch, num_graphs, nodes, nodes]
+                # weights: [num_graphs, 1, 1]
+                weighted_adjs = adj_matrices * weights.unsqueeze(0)  # [batch, num_graphs, nodes, nodes]
+                combined_adj = weighted_adjs.sum(dim=1)  # [batch, nodes, nodes]
+            elif adj_matrices.dim() == 3:
+                # adj_matrices: [num_graphs, nodes, nodes]
+                # weights: [num_graphs, 1, 1]
+                weighted_adjs = adj_matrices * weights  # [num_graphs, nodes, nodes]
+                combined_adj = weighted_adjs.sum(dim=0)  # [nodes, nodes]
+            elif adj_matrices.dim() == 2:
+                combined_adj = adj_matrices
+            else:
+                raise ValueError(
+                    f"Unsupported adjacency tensor shape: {tuple(adj_matrices.shape)}"
+                )
+        else:
+            weights_flat = weights.view(-1)
+            combined_adj = sum(w * adj for w, adj in zip(weights_flat, adj_matrices))
+            if not isinstance(combined_adj, torch.Tensor):
+                combined_adj = torch.as_tensor(combined_adj, dtype=features.dtype)
+
+        combined_adj = combined_adj.to(features.device, dtype=features.dtype)
+
+        # features: [batch, nodes, hidden_dim]
+        # combined_adj: [nodes, nodes] or [batch, nodes, nodes]
+        if combined_adj.dim() == 2:
+            # combined_adj is [nodes, nodes], features is [batch, nodes, hidden]
+            # Process each sample separately for DP compatibility
+            batch_size = features.shape[0]
+            outputs = []
+            for i in range(batch_size):
+                # features[i]: [nodes, hidden]
+                # combined_adj: [nodes, nodes]
+                # result: [nodes, hidden]
+                out = torch.matmul(combined_adj, features[i])
+                outputs.append(out.unsqueeze(0))
+            return torch.cat(outputs, dim=0)  # [batch, nodes, hidden]
+        elif combined_adj.dim() == 3:
+            # Batched matrix multiplication
+            # combined_adj: [batch, nodes, nodes], features: [batch, nodes, hidden]
+            # Process each sample separately for DP compatibility
+            batch_size = features.shape[0]
+            outputs = []
+            for i in range(batch_size):
+                out = torch.matmul(combined_adj[i], features[i])
+                outputs.append(out.unsqueeze(0))
+            return torch.cat(outputs, dim=0)  # [batch, nodes, hidden]
+        else:
+            raise ValueError(
+                f"Combined adjacency must be 2D or 3D, got {tuple(combined_adj.shape)}"
+            )
 
 class OutputProjection(nn.Module):
     def __init__(self, hidden_dim=64, output_steps=12):
@@ -175,7 +246,7 @@ class OptimizedDSAFNet(nn.Module):
             x = x.permute(0, 2, 3, 1)
         
         batch_size, airports, time_steps, features = x.shape
-        adj_matrices = supports if supports is not None else []
+        adj_matrices = supports
         
         # Vectorized spatial and temporal processing - NO LOOPS!
         spatial_features = self.spatial_stream(x)  # [batch, airports, time, hidden]
@@ -189,10 +260,7 @@ class OptimizedDSAFNet(nn.Module):
         fused = self.cross_fusion(spatial_avg, temporal_avg)
         
         # Graph encoding
-        if adj_matrices:
-            graph_enhanced = self.graph_encoder(fused, adj_matrices)
-        else:
-            graph_enhanced = fused
+        graph_enhanced = self.graph_encoder(fused, adj_matrices) if adj_matrices is not None else fused
         
         # Output projection
         out = self.output_proj(graph_enhanced)
@@ -371,13 +439,13 @@ def main():
     parser.add_argument('--in_len', type=int, default=12, help='input time series length')
     parser.add_argument('--out_len', type=int, default=12, help='output time series length')
     parser.add_argument('--batch', type=int, default=64, help='training batch size')
-    parser.add_argument('--episode', type=int, default=7, help='training episodes')
+    parser.add_argument('--episode', type=int, default=25, help='training episodes')
     parser.add_argument('--period', type=int, default=36, help='periodic for temporal embedding')
     parser.add_argument('--hidden_dim', type=int, default=64, help='hidden dimension')
     parser.add_argument('--num_workers', type=int, default=4, help='number of data loader workers')
     
     # DP parameters
-    parser.add_argument('--dp', default=False, action='store_true', help='enable differential privacy')
+    parser.add_argument('--dp', default=True, action='store_true', help='enable differential privacy')
     parser.add_argument('--target_epsilon', type=float, default=4.0, help='target epsilon')
     parser.add_argument('--target_delta', type=float, default=1e-5, help='delta for DP')
     parser.add_argument('--noise_multiplier', type=float, default=1.5, help='noise multiplier')
@@ -418,14 +486,13 @@ def main():
     print("🤖 CREATING OPTIMIZED MODEL")
     print("="*60)
     # If DP requested but Opacus does not provide a DP-compatible MultiheadAttention,
-    # warn and disable DP so training can continue. To enable DP with attention, install
-    # a newer opacus that exposes DPMultiheadAttention (or implement a compatible layer).
+    # provide an option to error instead of silently disabling DP.
     if args.dp and OpacusMultiheadAttention is None:
-        print("⚠️  Requested DP training but Opacus DPMultiheadAttention is not available.")
-        print("   Disabling --dp for this run. To enable DP with attention, upgrade opacus or provide a compatible DPMultiheadAttention.")
-        args.dp = False
-
-    attention_cls = OpacusMultiheadAttention if args.dp else None
+        print("⚠️  Warning: DPMultiheadAttention is not available. Proceeding with PrivacyEngine without DP-compatible attention.")
+        print("   This may lead to reduced privacy guarantees or slower training.")
+        attention_cls = None  # Fallback to standard attention
+    else:
+        attention_cls = OpacusMultiheadAttention
 
     model = OptimizedDSAFNet(
         input_dim=args.in_channels,
@@ -442,7 +509,11 @@ def main():
     print(f"✅ Model on device: {device}")
     print("="*60)
 
-    supports = [torch.tensor(i, dtype=torch.float32, device=device) for i in adj]
+    supports = torch.stack(
+        [torch.as_tensor(i, dtype=torch.float32) for i in adj], dim=0
+    ).to(device)
+    # Keep adjacency data as a tensor so DP hooks never receive mutable Python lists.
+    model.graph_encoder.set_adjacency(supports)
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.decay)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,

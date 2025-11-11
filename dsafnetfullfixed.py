@@ -378,14 +378,14 @@ def main():
     parser.add_argument('--in_len', type=int, default=12, help='input time series length')
     parser.add_argument('--out_len', type=int, default=12, help='output time series length')
     parser.add_argument('--batch', type=int, default=64, help='training batch size')
-    parser.add_argument('--episode', type=int, default=15, help='training episodes')
+    parser.add_argument('--episode', type=int, default=20, help='training episodes')
     parser.add_argument('--period', type=int, default=36, help='periodic for temporal embedding')
     parser.add_argument('--hidden_dim', type=int, default=64, help='hidden dimension')
     parser.add_argument('--num_workers', type=int, default=4, help='number of data loader workers')
     
     # DP parameters8f
     parser.add_argument('--dp', default=True, action='store_true', help='enable differential privacy')
-    parser.add_argument('--target_epsilon', type=float, default=7.0, help='target epsilon')
+    parser.add_argument('--target_epsilon', type=float, default=10.0, help='target epsilon')
     parser.add_argument('--target_delta', type=float, default=1e-5, help='delta for DP')
     parser.add_argument('--noise_multiplier', type=float, default=1.5, help='noise multiplier')
     parser.add_argument('--max_grad_norm', type=float, default=1.5, help='gradient clipping norm')

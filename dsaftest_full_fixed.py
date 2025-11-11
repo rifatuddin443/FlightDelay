@@ -13,6 +13,7 @@ import argparse
 import sys
 import os
 import util
+import csv
 
 from baseline_methods import test_error, StandardScaler
 
@@ -208,6 +209,7 @@ parser.add_argument('--out_len', type=int, default=12, help='output time series 
 parser.add_argument('--period', type=int, default=36, help='periodic for temporal embedding')
 parser.add_argument('--hidden_dim', type=int, default=64, help='hidden dimension')
 parser.add_argument('--model_path', type=str, default='./results/optimized_dsafnet_US.pth', help='path to saved model')
+parser.add_argument('--out_csv', type=str, default='./results/dsaftest_full_fixed_results.csv', help='path to write CSV results')
 
 args = parser.parse_args()
 
@@ -440,17 +442,26 @@ def main():
     print("📈 TEST RESULTS")
     print("="*60)
     
+    # Prepare results collection for CSV
+    results_rows = []
     # Calculate metrics for arrival and departure delay at key time steps
     for step in [2, 5, 11]:
         print(f"\n--- {step+1} Step Ahead Predictions ---")
         
         # Arrival delay (feature 0)
-        MAE, RMSE, R2 = test_error(yhat[:, :, step, 0], label[:, :, step, 0])
-        print(f"Arrival Delay  | MAE: {MAE:7.4f} min | RMSE: {RMSE:7.4f} min | R²: {R2:7.4f}")
+        MAE_a, RMSE_a, R2_a = test_error(yhat[:, :, step, 0], label[:, :, step, 0])
+        print(f"Arrival Delay  | MAE: {MAE_a:7.4f} min | RMSE: {RMSE_a:7.4f} min | R²: {R2_a:7.4f}")
         
         # Departure delay (feature 1)
-        MAE, RMSE, R2 = test_error(yhat[:, :, step, 1], label[:, :, step, 1])
-        print(f"Departure Delay| MAE: {MAE:7.4f} min | RMSE: {RMSE:7.4f} min | R²: {R2:7.4f}")
+        MAE_d, RMSE_d, R2_d = test_error(yhat[:, :, step, 1], label[:, :, step, 1])
+        print(f"Departure Delay| MAE: {MAE_d:7.4f} min | RMSE: {RMSE_d:7.4f} min | R²: {R2_d:7.4f}")
+
+        # Append row for this step
+        results_rows.append([
+            step + 1,
+            float(MAE_a), float(RMSE_a), float(R2_a),
+            float(MAE_d), float(RMSE_d), float(R2_d)
+        ])
     
     # Calculate average metrics across all time steps
     print("\n" + "="*60)
@@ -479,6 +490,30 @@ def main():
     print("\n" + "="*60)
     print("✅ TESTING COMPLETE!")
     print("="*60)
+
+    # Append average / overall metrics row
+    results_rows.append([
+        'avg',
+        float(np.mean(amae_arr)), float(np.mean(armse_arr)), float(np.mean(ar2_arr)),
+        float(np.mean(amae_dep)), float(np.mean(armse_dep)), float(np.mean(ar2_dep))
+    ])
+
+    # Write results to CSV
+    out_csv = args.out_csv
+    out_dir = os.path.dirname(out_csv)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    header = ['step', 'arrival_mae', 'arrival_rmse', 'arrival_r2', 'departure_mae', 'departure_rmse', 'departure_r2']
+    try:
+        with open(out_csv, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(header)
+            for row in results_rows:
+                writer.writerow(row)
+        print(f"\n💾 CSV results written to: {out_csv}")
+    except Exception as e:
+        print(f"⚠️  Failed to write CSV results to {out_csv}: {e}")
 
 if __name__ == "__main__":
     main()

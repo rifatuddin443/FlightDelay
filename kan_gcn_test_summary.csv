@@ -1,0 +1,4 @@
+metric,value
+test_mae,6.3244843
+test_rmse,8.832304
+best_val_mae,5.7437425

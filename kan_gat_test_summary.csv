@@ -1,0 +1,7 @@
+metric,value
+1step_test_mae,6.487639
+1step_test_rmse,9.556911
+best_val_mae,6.1044717
+learned_adj_weight,0.6123652458190918
+learned_OD_weight,0.12579062581062317
+learned_OD_transpose_weight,0.26184412837028503

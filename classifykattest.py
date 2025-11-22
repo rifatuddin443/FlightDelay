@@ -1,15 +1,10 @@
-"""Sequential two-stage KAN-GAT tester.
-
-Loads the saved checkpoint from `classifykat.py` training and evaluates
-3-, 6-, and 12-step ahead arrival/departure delay metrics, mirroring the
-multi-horizon reporting style used by `kan_gcn_test.py`.
-"""
+"""Sequential two-stage KAN-GAT tester with weather + temporal embeddings."""
 
 import argparse
+import csv
 import os
 import sys
-import csv
-from typing import Dict, List, Tuple
+from typing import Dict
 
 import numpy as np
 import torch
@@ -28,62 +23,41 @@ def set_seed(seed: int = 42):
         torch.cuda.manual_seed_all(seed)
 
 
-def prepare_sequences(
-    scaled: np.ndarray,
-    raw: np.ndarray,
-    seq_len: int,
-    horizon: int,
-) -> Tuple[torch.Tensor, np.ndarray]:
-    """Create sliding-window sequences for the specified horizon."""
-    num_nodes = scaled.shape[0]
-    max_idx = scaled.shape[1] - seq_len - horizon
-    x_list: List[np.ndarray] = []
-    y_list: List[np.ndarray] = []
-
-    for t in range(max_idx):
-        x_seq = scaled[:, t:t + seq_len, :].reshape(num_nodes, -1)
-        y_seq = raw[:, t + seq_len:t + seq_len + horizon, :]
-        y_seq = np.nan_to_num(y_seq)
-        y_seq = y_seq.reshape(num_nodes, horizon, -1)
-
-        x_list.append(x_seq)
-        y_list.append(y_seq)
-
-    if not x_list:
-        return torch.empty(0), np.empty((0, num_nodes, horizon, scaled.shape[2]))
-
-    x_tensor = torch.tensor(np.stack(x_list), dtype=torch.float32)
-    y_array = np.stack(y_list)
-    return x_tensor, y_array
-
-
 def evaluate_horizon(
     model: SequentialTwoStagePredictor,
     edge_index_adj: torch.Tensor,
     edge_index_od: torch.Tensor,
     edge_index_od_t: torch.Tensor,
     device: torch.device,
-    test_scaled: np.ndarray,
+    test_inputs: np.ndarray,
     test_raw: np.ndarray,
     scaler,
     seq_len: int,
     horizon: int,
     class_threshold: float,
+    delay_dim: int,
 ) -> Dict[str, float]:
-    base_features = test_scaled.shape[2]
-    test_x, test_y = prepare_sequences(test_scaled, test_raw, seq_len, horizon)
-    if len(test_x) == 0:
+    num_nodes, total_steps, feature_dim = test_inputs.shape
+    aux_dim = feature_dim - delay_dim
+    max_idx = total_steps - seq_len - horizon
+    if max_idx <= 0:
         print(f"Skipping horizon {horizon}: insufficient timesteps")
         return {}
 
+    inputs_tensor = torch.tensor(test_inputs, dtype=torch.float32, device=device)
+    test_raw = np.nan_to_num(test_raw)
+
     all_preds = []
+    all_targets = []
 
     model.eval()
     with torch.no_grad():
-        for idx in range(len(test_x)):
-            current_input = test_x[idx].to(device)
-            step_preds = []
+        for start_idx in range(max_idx):
+            current_input = inputs_tensor[:, start_idx:start_idx + seq_len, :].reshape(num_nodes, -1)
+            future_aux = inputs_tensor[:, start_idx + seq_len:start_idx + seq_len + horizon, delay_dim:]
+            target_seq = test_raw[:, start_idx + seq_len:start_idx + seq_len + horizon, :]
 
+            step_preds = []
             for step in range(horizon):
                 data = Data(
                     x=current_input,
@@ -98,21 +72,25 @@ def evaluate_horizon(
                 step_preds.append(gated_reg.cpu().numpy())
 
                 if step < horizon - 1:
+                    if aux_dim > 0:
+                        aux_vector = future_aux[:, step, :]
+                        new_features = torch.cat([gated_reg, aux_vector], dim=1)
+                    else:
+                        new_features = gated_reg
                     current_input = torch.cat([
-                        current_input[:, base_features:],
-                        gated_reg,
+                        current_input[:, feature_dim:],
+                        new_features,
                     ], dim=1)
 
-            # Stack predictions into (num_nodes, horizon, features)
-            seq_pred = np.stack(step_preds, axis=0)  # (horizon, num_nodes, features)
-            seq_pred = np.transpose(seq_pred, (1, 0, 2))
+            seq_pred = np.stack(step_preds, axis=0).transpose(1, 0, 2)
             all_preds.append(seq_pred)
+            all_targets.append(target_seq)
 
     all_preds = np.array(all_preds)
     preds_denorm = scaler.inverse_transform(
-        all_preds.reshape(-1, base_features)
+        all_preds.reshape(-1, delay_dim)
     ).reshape(all_preds.shape)
-    targets_denorm = test_y  # already in original scale
+    targets_denorm = np.array(all_targets)
 
     arrival_preds = preds_denorm[:, :, horizon - 1, 0]
     arrival_targets = targets_denorm[:, :, horizon - 1, 0]
@@ -151,12 +129,10 @@ def print_results_table(results: Dict[int, Dict[str, float]]):
     for horizon in sorted(results.keys()):
         res = results[horizon]
         print(
-            f"{horizon}-step    {'Arrival':<15} {res['arr_mae']:<12.4f} "
-            f"{res['arr_rmse']:<12.4f} {res['arr_r2']:<12.4f}"
+            f"{horizon}-step    {'Arrival':<15} {res['arr_mae']:<12.4f} {res['arr_rmse']:<12.4f} {res['arr_r2']:<12.4f}"
         )
         print(
-            f"{'':10} {'Departure':<15} {res['dep_mae']:<12.4f} "
-            f"{res['dep_rmse']:<12.4f} {res['dep_r2']:<12.4f}"
+            f"{'':10} {'Departure':<15} {res['dep_mae']:<12.4f} {res['dep_rmse']:<12.4f} {res['dep_r2']:<12.4f}"
         )
     print("=" * 80)
 
@@ -181,42 +157,57 @@ def save_results(results: Dict[int, Dict[str, float]], path: str):
 
 def main():
     parser = argparse.ArgumentParser(description='Sequential two-stage tester (multi-horizon)')
-    parser.add_argument('--data_dir', type=str, default='cdata')
+    parser.add_argument('--data_source', type=str, default='udata', choices=['cdata', 'udata'],
+                        help='Data source folder: cdata (China) or udata (USA)')
     parser.add_argument('--seq_len', type=int, default=8)
     parser.add_argument('--model_path', type=str, default='kan_gat_sequential_best.pth')
     parser.add_argument('--class_threshold', type=float, default=0.5)
     parser.add_argument('--horizons', type=int, nargs='+', default=[3, 6, 12])
+    parser.add_argument('--weather_file', type=str, default='weather_cn.npy')
+    parser.add_argument('--period_hours', type=int, default=24)
     parser.add_argument('--seed', type=int, default=42)
     args = parser.parse_args()
 
+    if args.data_source == 'udata':
+        args.weather_file = 'weather2016_2021.npy'
+
     set_seed(args.seed)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    data_dir = args.data_source
 
     (
         edge_index_adj,
         edge_index_od,
         edge_index_od_t,
-        train_scaled,
-        val_scaled,
-        test_scaled,
+        train_inputs,
+        _,
+        test_inputs,
+        train_delay_scaled,
+        _,
+        test_delay_scaled,
         train_raw,
-        val_raw,
+        _,
         test_raw,
         scaler,
         num_nodes,
-    ) = load_flight_data(args.data_dir)
+    ) = load_flight_data(
+        data_dir,
+        weather_file=args.weather_file,
+        period_hours=args.period_hours,
+        data_source=args.data_source,
+    )
 
     edge_index_adj = edge_index_adj.to(device)
     edge_index_od = edge_index_od.to(device)
     edge_index_od_t = edge_index_od_t.to(device)
 
-    base_features = train_scaled.shape[2]
-    in_channels = args.seq_len * base_features
-    out_channels = base_features
+    feature_dim = train_inputs.shape[2]
+    delay_dim = train_delay_scaled.shape[2]
 
     model = SequentialTwoStagePredictor(
-        in_channels=in_channels,
-        out_channels=out_channels,
+        in_channels=args.seq_len * feature_dim,
+        out_channels=delay_dim,
         hidden_channels=32,
     ).to(device)
 
@@ -243,12 +234,13 @@ def main():
             edge_index_od,
             edge_index_od_t,
             device,
-            test_scaled,
+            test_inputs,
             test_raw,
             scaler,
             args.seq_len,
             horizon,
             args.class_threshold,
+            delay_dim,
         )
         if res:
             results[horizon] = res

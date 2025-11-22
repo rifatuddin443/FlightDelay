@@ -1,0 +1,24 @@
+Loaded DP model from: kan_gat_dp_proper.pth
+Final ε: 7.693
+Final δ: 1.00e-05
+
+================================================================================
+TEST RESULTS
+================================================================================
+
+CLASSIFICATION METRICS:
+  Precision: 1.0000 | Recall: 0.7681 | F1: 0.8689 | Accuracy: 0.7681
+
+REGRESSION (Delayed Samples):
+  MAE: 4.4250 min | RMSE: 5.4907 min
+
+PER-HORIZON RESULTS:
+  3-step Arrival  -> MAE: 4.8329, RMSE: 5.7361, R²: -0.5886
+  3-step Departure-> MAE: 2.9580, RMSE: 3.6620, R²: -0.0360
+  6-step Arrival  -> MAE: 6.9114, RMSE: 7.7782, R²: -1.9193
+  6-step Departure-> MAE: 3.1871, RMSE: 3.9840, R²: -0.2254
+  12-step Arrival  -> MAE: 5.6990, RMSE: 6.6019, R²: -1.1009
+  12-step Departure-> MAE: 2.9614, RMSE: 3.8231, R²: -0.1285
+
+✓ Summary saved to: classifykatdpnew_test_summary.csv
+✓ Predictions saved to: classifykatdpnew_test_predictions.csv

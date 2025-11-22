@@ -40,13 +40,51 @@ class StandardScaler:
 
     def __init__(self, mean: float, std: float):
         self.mean = mean
-        self.std = std if std != 0 else 1.0
+        std = np.array(std)
+        self.std = np.where(std == 0, 1.0, std)
 
     def transform(self, data: np.ndarray) -> np.ndarray:
         return (data - self.mean) / self.std
 
     def inverse_transform(self, data: np.ndarray) -> np.ndarray:
         return data * self.std + self.mean
+
+
+class EarlyStopping:
+    """Early stopping to stop training when validation metric stops improving."""
+    
+    def __init__(self, patience: int = 5, min_delta: float = 1e-4, mode: str = 'max'):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.mode = mode
+        self.counter = 0
+        self.best_score = None
+        self.early_stop = False
+        self.best_epoch = 0
+        
+    def __call__(self, score: float, epoch: int) -> bool:
+        if self.best_score is None:
+            self.best_score = score
+            self.best_epoch = epoch
+            return False
+            
+        if self.mode == 'max':
+            improved = score > (self.best_score + self.min_delta)
+        else:  # min
+            improved = score < (self.best_score - self.min_delta)
+            
+        if improved:
+            self.best_score = score
+            self.best_epoch = epoch
+            self.counter = 0
+        else:
+            self.counter += 1
+            if self.counter >= self.patience:
+                self.early_stop = True
+                print(f"\n⏹️  Early stopping triggered! No improvement for {self.patience} epochs.")
+                print(f"   Best score: {self.best_score:.4f} at epoch {self.best_epoch}")
+                return True
+        return False
 
 
 class LightweightGATEncoder(nn.Module):
@@ -127,10 +165,34 @@ def load_flight_data(
     data_dir: str,
     train_ratio: float = 0.7,
     val_ratio: float = 0.1,
+    weather_file: str = 'weather_cn.npy',
+    period_hours: int = 24,
+    data_source: str = 'udata',
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, StandardScaler, int]:
-    od_mx = np.load(os.path.join(data_dir, 'od_mx.npy'))
-    adj_mx = np.load(os.path.join(data_dir, 'dist_mx.npy'))
-    delay_data = np.load(os.path.join(data_dir, 'delay.npy'))
+    # Select correct files based on data source
+    if data_source == 'udata':
+        od_file = 'od_pair.npy'
+        adj_file = 'adj_mx.npy'
+        delay_file = 'udelay.npy'
+    else:
+        od_file = 'od_mx.npy'
+        adj_file = 'dist_mx.npy'
+        delay_file = 'delay.npy'
+    
+    od_mx = np.load(os.path.join(data_dir, od_file))
+    adj_mx = np.load(os.path.join(data_dir, adj_file))
+    delay_data = np.load(os.path.join(data_dir, delay_file))
+
+    # Load weather data
+    weather_path = os.path.join(data_dir, weather_file)
+    if not os.path.exists(weather_path):
+        raise FileNotFoundError(f"Weather file not found: {weather_path}")
+    weather_data = np.load(weather_path)
+    if weather_data.ndim == 2:
+        weather_data = weather_data[..., np.newaxis]
+
+    if weather_data.shape[0] != delay_data.shape[0] or weather_data.shape[1] != delay_data.shape[1]:
+        raise ValueError('Weather data shape must align with delay data (num_nodes, timesteps, features).')
 
     num_nodes = od_mx.shape[0]
     edge_index_od = torch.tensor(np.array(od_mx.nonzero()), dtype=torch.long)
@@ -145,18 +207,49 @@ def load_flight_data(
     val_raw = delay_data[:, train_end:val_end, :]
     test_raw = delay_data[:, val_end:, :]
 
+    # Delay scaler (targets)
     scaler = StandardScaler(
         mean=np.nanmean(train_raw),
         std=np.nanstd(train_raw),
     )
+    delay_scaled = scaler.transform(delay_data)
+    delay_scaled = np.nan_to_num(delay_scaled)
 
-    def scale_and_fill(arr: np.ndarray) -> np.ndarray:
-        scaled = scaler.transform(arr)
-        return np.nan_to_num(scaled)
+    # Weather scaler (inputs only)
+    weather_train = weather_data[:, :train_end, :]
+    weather_mean = np.nanmean(weather_train, axis=(0, 1))
+    weather_std = np.nanstd(weather_train, axis=(0, 1))
+    weather_scaler = StandardScaler(weather_mean, weather_std)
+    weather_scaled = weather_scaler.transform(weather_data)
+    weather_scaled = np.nan_to_num(weather_scaled)
 
-    train_scaled = scale_and_fill(train_raw)
-    val_scaled = scale_and_fill(val_raw)
-    test_scaled = scale_and_fill(test_raw)
+    # Temporal embeddings (sin/cos encoding)
+    time_indices = np.arange(total_steps)
+    radians = 2 * np.pi * ((time_indices % period_hours) / period_hours)
+    time_embed = np.stack([np.sin(radians), np.cos(radians)], axis=-1)
+    time_embed = np.broadcast_to(time_embed, (num_nodes, total_steps, 2))
+
+    # Split datasets
+    train_delay = delay_scaled[:, :train_end, :]
+    val_delay = delay_scaled[:, train_end:val_end, :]
+    test_delay = delay_scaled[:, val_end:, :]
+
+    # Combine delay + weather + temporal features
+    train_scaled = np.concatenate([
+        train_delay,
+        weather_scaled[:, :train_end, :],
+        time_embed[:, :train_end, :],
+    ], axis=2)
+    val_scaled = np.concatenate([
+        val_delay,
+        weather_scaled[:, train_end:val_end, :],
+        time_embed[:, train_end:val_end, :],
+    ], axis=2)
+    test_scaled = np.concatenate([
+        test_delay,
+        weather_scaled[:, val_end:, :],
+        time_embed[:, val_end:, :],
+    ], axis=2)
 
     return (
         edge_index_adj,
@@ -465,20 +558,31 @@ def print_multihorizon_table(results: Dict[int, Dict[str, float]]):
 
 def main():
     parser = argparse.ArgumentParser(description='Two-stage lightweight KAN-GAT delay predictor')
-    parser.add_argument('--data_dir', type=str, default='cdata')
+    parser.add_argument('--data_source', type=str, default='udata', choices=['cdata', 'udata'],
+                        help='Data source folder: cdata (China) or udata (USA)')
     parser.add_argument('--seq_len', type=int, default=8)
     parser.add_argument('--horizon', type=int, default=1)
-    parser.add_argument('--epochs', type=int, default=15)
-    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--epochs', type=int, default=12)
+    parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--lr', type=float, default=0.003)
     parser.add_argument('--reg_loss_weight', type=float, default=1.0)
     parser.add_argument('--delay_threshold', type=float, default=5.0, help='Minutes to tag as delayed')
     parser.add_argument('--class_threshold', type=float, default=0.5)
+    parser.add_argument('--weather_file', type=str, default='weather_cn.npy')
+    parser.add_argument('--period_hours', type=int, default=24)
+    parser.add_argument('--patience', type=int, default=5, help='Early stopping patience')
     parser.add_argument('--seed', type=int, default=42)
     args = parser.parse_args()
+    
+    # Set weather file based on data source
+    if args.data_source == 'udata':
+        args.weather_file = 'weather2016_2021.npy'
+    
+    data_dir = args.data_source
 
     set_seed(args.seed)
-    device = torch.device('cpu' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
 
     (
         edge_index_adj,
@@ -492,7 +596,12 @@ def main():
         test_raw,
         scaler,
         num_nodes,
-    ) = load_flight_data(args.data_dir)
+    ) = load_flight_data(
+        data_dir,
+        weather_file=args.weather_file,
+        period_hours=args.period_hours,
+        data_source=args.data_source,
+    )
 
     in_channels = args.seq_len * train_scaled.shape[2]
     out_channels = args.horizon * train_scaled.shape[2]
@@ -533,47 +642,71 @@ def main():
     history = []
     best_val_f1 = 0.0
     best_model_path = 'kan_gat_two_stage_best.pth'
+    early_stopping = EarlyStopping(patience=args.patience, mode='max')
 
     num_sequences = len(train_x)
-    print(f'Training on {num_sequences} sequences, device={device}')
+    num_batches = (num_sequences + args.batch_size - 1) // args.batch_size
+    print(f'Training on {num_sequences} sequences, {num_batches} batches per epoch, device={device}')
 
     for epoch in range(args.epochs):
         model.train()
         perm = torch.randperm(num_sequences)
         losses = []
-        for idx in perm:
-            x = train_x[idx].to(device)
-            y_reg = train_y_reg[idx].to(device)
-            y_cls = train_y_cls[idx].to(device)
-
-            data = Data(
-                x=x,
-                edge_index_adj=edge_index_adj,
-                edge_index_od=edge_index_od,
-                edge_index_od_t=edge_index_od_t,
-            )
-
-            logits, reg = model(data)
-
-            cls_loss = cls_loss_fn(logits, y_cls)
-            mask = y_cls > 0.5
-            if mask.sum() > 0:
-                expanded_mask = mask.expand_as(y_reg)
-                reg_loss = reg_loss_fn(reg[expanded_mask], y_reg[expanded_mask])
-            else:
-                reg_loss = torch.tensor(0.0, device=device)
-
-            loss = cls_loss + args.reg_loss_weight * reg_loss
+        
+        # Mini-batch training for efficiency
+        for batch_idx in range(num_batches):
+            start_idx = batch_idx * args.batch_size
+            end_idx = min(start_idx + args.batch_size, num_sequences)
+            batch_indices = perm[start_idx:end_idx]
+            
             optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            losses.append(loss.item())
+            batch_loss = 0.0
+            batch_count = 0
+            
+            for idx in batch_indices:
+                x = train_x[idx].to(device)
+                y_reg = train_y_reg[idx].to(device)
+                y_cls = train_y_cls[idx].to(device)
 
+                data = Data(
+                    x=x,
+                    edge_index_adj=edge_index_adj,
+                    edge_index_od=edge_index_od,
+                    edge_index_od_t=edge_index_od_t,
+                )
+
+                logits, reg = model(data)
+
+                cls_loss = cls_loss_fn(logits, y_cls)
+                mask = y_cls > 0.5
+                if mask.sum() > 0:
+                    expanded_mask = mask.expand_as(y_reg)
+                    reg_loss = reg_loss_fn(reg[expanded_mask], y_reg[expanded_mask])
+                else:
+                    reg_loss = torch.tensor(0.0, device=device)
+
+                loss = cls_loss + args.reg_loss_weight * reg_loss
+                batch_loss += loss
+                batch_count += 1
+            
+            if batch_count > 0:
+                batch_loss = batch_loss / batch_count
+                batch_loss.backward()
+                optimizer.step()
+                losses.append(batch_loss.item())
+
+        # Validation on subset for speed
+        val_sample_size = min(len(val_x), 100)
+        val_indices = torch.randperm(len(val_x))[:val_sample_size]
+        val_x_sample = val_x[val_indices]
+        val_y_reg_sample = val_y_reg[val_indices]
+        val_y_cls_sample = val_y_cls[val_indices]
+        
         val_metrics = evaluate_split(
             model,
-            val_x,
-            val_y_reg,
-            val_y_cls,
+            val_x_sample,
+            val_y_reg_sample,
+            val_y_cls_sample,
             edge_index_adj,
             edge_index_od,
             edge_index_od_t,
@@ -596,6 +729,10 @@ def main():
             best_val_f1 = val_metrics['f1']
             torch.save(model.state_dict(), best_model_path)
             print('  -> Saved new best model')
+        
+        # Early stopping check
+        if early_stopping(val_metrics['f1'], epoch + 1):
+            break
 
     print('Training complete. Evaluating on test split...')
     model.load_state_dict(torch.load(best_model_path, map_location=device))

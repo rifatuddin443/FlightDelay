@@ -12,7 +12,7 @@ import argparse
 import csv
 import os
 import sys
-from typing import Dict, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -39,13 +39,51 @@ class StandardScaler:
 
     def __init__(self, mean: float, std: float):
         self.mean = mean
-        self.std = std if std != 0 else 1.0
+        std = np.array(std)
+        self.std = np.where(std == 0, 1.0, std)
 
     def transform(self, data: np.ndarray) -> np.ndarray:
         return (data - self.mean) / self.std
 
     def inverse_transform(self, data: np.ndarray) -> np.ndarray:
         return data * self.std + self.mean
+
+
+class EarlyStopping:
+    """Early stopping to stop training when validation metric stops improving."""
+    
+    def __init__(self, patience: int = 5, min_delta: float = 1e-4, mode: str = 'min'):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.mode = mode
+        self.counter = 0
+        self.best_score = None
+        self.early_stop = False
+        self.best_epoch = 0
+        
+    def __call__(self, score: float, epoch: int) -> bool:
+        if self.best_score is None:
+            self.best_score = score
+            self.best_epoch = epoch
+            return False
+            
+        if self.mode == 'min':
+            improved = score < (self.best_score - self.min_delta)
+        else:  # max
+            improved = score > (self.best_score + self.min_delta)
+            
+        if improved:
+            self.best_score = score
+            self.best_epoch = epoch
+            self.counter = 0
+        else:
+            self.counter += 1
+            if self.counter >= self.patience:
+                self.early_stop = True
+                print(f"\n⏹️  Early stopping triggered! No improvement for {self.patience} epochs.")
+                print(f"   Best score: {self.best_score:.4f} at epoch {self.best_epoch}")
+                return True
+        return False
 
 
 class LightweightGATEncoder(nn.Module):
@@ -137,10 +175,32 @@ def load_flight_data(
     data_dir: str,
     train_ratio: float = 0.7,
     val_ratio: float = 0.1,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, StandardScaler, int]:
-    od_mx = np.load(os.path.join(data_dir, 'od_mx.npy'))
-    adj_mx = np.load(os.path.join(data_dir, 'dist_mx.npy'))
-    delay_data = np.load(os.path.join(data_dir, 'delay.npy'))
+    weather_file: str = 'weather_cn.npy',
+    period_hours: int = 24,
+    data_source: str = 'cdata',
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, StandardScaler, int]:
+    if data_source == 'udata':
+        od_file = 'od_pair.npy'
+        adj_file = 'adj_mx.npy'
+        delay_file = 'udelay.npy'
+    else:
+        od_file = 'od_mx.npy'
+        adj_file = 'dist_mx.npy'
+        delay_file = 'delay.npy'
+
+    od_mx = np.load(os.path.join(data_dir, od_file))
+    adj_mx = np.load(os.path.join(data_dir, adj_file))
+    delay_data = np.load(os.path.join(data_dir, delay_file))
+
+    weather_path = os.path.join(data_dir, weather_file)
+    if not os.path.exists(weather_path):
+        raise FileNotFoundError(f"Weather file not found: {weather_path}")
+    weather_data = np.load(weather_path)
+    if weather_data.ndim == 2:
+        weather_data = weather_data[..., np.newaxis]
+
+    if weather_data.shape[0] != delay_data.shape[0] or weather_data.shape[1] != delay_data.shape[1]:
+        raise ValueError('Weather data shape must align with delay data (num_nodes, timesteps, features).')
 
     num_nodes = od_mx.shape[0]
     edge_index_od = torch.tensor(np.array(od_mx.nonzero()), dtype=torch.long)
@@ -155,26 +215,59 @@ def load_flight_data(
     val_raw = delay_data[:, train_end:val_end, :]
     test_raw = delay_data[:, val_end:, :]
 
+    # Delay scaler (targets)
     scaler = StandardScaler(
         mean=np.nanmean(train_raw),
         std=np.nanstd(train_raw),
     )
+    delay_scaled = scaler.transform(delay_data)
+    delay_scaled = np.nan_to_num(delay_scaled)
 
-    def scale_and_fill(arr: np.ndarray) -> np.ndarray:
-        scaled = scaler.transform(arr)
-        return np.nan_to_num(scaled)
+    # Weather scaler (inputs only)
+    weather_train = weather_data[:, :train_end, :]
+    weather_mean = np.nanmean(weather_train, axis=(0, 1))
+    weather_std = np.nanstd(weather_train, axis=(0, 1))
+    weather_scaler = StandardScaler(weather_mean, weather_std)
+    weather_scaled = weather_scaler.transform(weather_data)
+    weather_scaled = np.nan_to_num(weather_scaled)
 
-    train_scaled = scale_and_fill(train_raw)
-    val_scaled = scale_and_fill(val_raw)
-    test_scaled = scale_and_fill(test_raw)
+    # Temporal embeddings (sin/cos encoding of 24h cycle)
+    time_indices = np.arange(total_steps)
+    radians = 2 * np.pi * ((time_indices % period_hours) / period_hours)
+    time_embed = np.stack([np.sin(radians), np.cos(radians)], axis=-1)
+    time_embed = np.broadcast_to(time_embed, (num_nodes, total_steps, 2))
+
+    # Split datasets
+    train_delay = delay_scaled[:, :train_end, :]
+    val_delay = delay_scaled[:, train_end:val_end, :]
+    test_delay = delay_scaled[:, val_end:, :]
+
+    train_inputs = np.concatenate([
+        train_delay,
+        weather_scaled[:, :train_end, :],
+        time_embed[:, :train_end, :],
+    ], axis=2)
+    val_inputs = np.concatenate([
+        val_delay,
+        weather_scaled[:, train_end:val_end, :],
+        time_embed[:, train_end:val_end, :],
+    ], axis=2)
+    test_inputs = np.concatenate([
+        test_delay,
+        weather_scaled[:, val_end:, :],
+        time_embed[:, val_end:, :],
+    ], axis=2)
 
     return (
         edge_index_adj,
         edge_index_od,
         edge_index_od_t,
-        train_scaled,
-        val_scaled,
-        test_scaled,
+        train_inputs,
+        val_inputs,
+        test_inputs,
+        train_delay,
+        val_delay,
+        test_delay,
         train_raw,
         val_raw,
         test_raw,
@@ -184,22 +277,33 @@ def load_flight_data(
 
 
 def build_sequences(
-    scaled: np.ndarray,
+    input_data: np.ndarray,
+    target_scaled: np.ndarray,
     raw: np.ndarray,
     seq_len: int,
     horizon: int,
     delay_threshold: float,
+    target_horizons: Optional[List[int]] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    num_nodes = scaled.shape[0]
-    max_idx = scaled.shape[1] - seq_len - horizon
+    num_nodes = input_data.shape[0]
+    max_idx = input_data.shape[1] - seq_len - horizon
     x_list, y_reg_list, y_cls_list = [], [], []
 
+    if target_horizons:
+        horizon_ids = [min(h, horizon) - 1 for h in sorted({h for h in target_horizons if h > 0})]
+    else:
+        horizon_ids = list(range(horizon))
+    if not horizon_ids:
+        raise ValueError("At least one future horizon is required to build sequences.")
+
     for t in range(max_idx):
-        x_seq = scaled[:, t:t + seq_len, :].reshape(num_nodes, -1)
-        y_seq = scaled[:, t + seq_len:t + seq_len + horizon, :].reshape(num_nodes, -1)
+        x_seq = input_data[:, t:t + seq_len, :].reshape(num_nodes, -1)
+        future_scaled = target_scaled[:, t + seq_len:t + seq_len + horizon, :]
+        future_scaled = future_scaled[:, horizon_ids, :]
+        y_seq = future_scaled.reshape(num_nodes, -1)
 
         raw_target = raw[:, t + seq_len:t + seq_len + horizon, :]
-        raw_target = np.nan_to_num(raw_target)
+        raw_target = np.nan_to_num(raw_target[:, horizon_ids, :])
         cls_flag = (np.max(np.abs(raw_target), axis=(1, 2)) >= delay_threshold).astype(np.float32)
         cls_flag = cls_flag.reshape(num_nodes, 1)
 
@@ -258,6 +362,8 @@ def train_stage1_classifier(
     epochs: int,
     lr: float,
     pos_weight: float,
+    batch_size: int = 16,
+    patience: int = 5,
 ) -> Dict:
     """Stage 1: Train encoder + classifier only."""
     print("\n" + "=" * 80)
@@ -277,38 +383,54 @@ def train_stage1_classifier(
     history = []
     best_val_f1 = 0.0
     best_state = None
+    early_stopping = EarlyStopping(patience=patience, mode='max')
 
     num_sequences = len(train_x)
+    num_batches = (num_sequences + batch_size - 1) // batch_size
     
     for epoch in range(epochs):
         model.train()
         perm = torch.randperm(num_sequences)
         losses = []
         
-        for idx in perm:
-            x = train_x[idx].to(device)
-            y_cls = train_y_cls[idx].to(device)
-
-            data = Data(
-                x=x,
-                edge_index_adj=edge_index_adj,
-                edge_index_od=edge_index_od,
-                edge_index_od_t=edge_index_od_t,
-            )
-
-            _, logits = model.forward_classifier(data)
-            loss = cls_loss_fn(logits, y_cls)
-
+        # Process in mini-batches for efficiency
+        for batch_idx in range(num_batches):
+            start_idx = batch_idx * batch_size
+            end_idx = min(start_idx + batch_size, num_sequences)
+            batch_indices = perm[start_idx:end_idx]
+            
             optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            losses.append(loss.item())
+            batch_loss = 0.0
+            
+            for idx in batch_indices:
+                x = train_x[idx].to(device)
+                y_cls = train_y_cls[idx].to(device)
 
-        # Validation
+                data = Data(
+                    x=x,
+                    edge_index_adj=edge_index_adj,
+                    edge_index_od=edge_index_od,
+                    edge_index_od_t=edge_index_od_t,
+                )
+
+                _, logits = model.forward_classifier(data)
+                loss = cls_loss_fn(logits, y_cls)
+                batch_loss += loss
+                
+            batch_loss = batch_loss / len(batch_indices)
+            batch_loss.backward()
+            optimizer.step()
+            losses.append(batch_loss.item())
+
+        # Validation - sample subset for speed
         model.eval()
+        val_sample_size = len(val_x)  # Validate on subset
+        val_indices = torch.randperm(len(val_x))[:val_sample_size]
         val_logits_list = []
+        val_targets_list = []
+        
         with torch.no_grad():
-            for i in range(len(val_x)):
+            for i in val_indices:
                 data = Data(
                     x=val_x[i].to(device),
                     edge_index_adj=edge_index_adj,
@@ -317,11 +439,13 @@ def train_stage1_classifier(
                 )
                 _, logits = model.forward_classifier(data)
                 val_logits_list.append(torch.sigmoid(logits).cpu().numpy())
+                val_targets_list.append(val_y_cls[i].numpy())
 
         val_probs = np.array(val_logits_list)
+        val_targets = np.array(val_targets_list)
         val_metrics = classification_metrics(
             val_probs.reshape(-1, 1),
-            val_y_cls.cpu().numpy().reshape(-1, 1),
+            val_targets.reshape(-1, 1),
         )
 
         history.append({
@@ -343,6 +467,16 @@ def train_stage1_classifier(
                 'classifier': model.classifier.state_dict(),
             }
             print('  -> New best F1 score')
+        
+        # Early stopping check
+        if early_stopping(val_metrics['f1'], epoch + 1):
+            break
+
+    if best_state is None:
+        best_state = {
+            'encoder': model.encoder.state_dict(),
+            'classifier': model.classifier.state_dict(),
+        }
 
     # Load best classifier
     model.encoder.load_state_dict(best_state['encoder'])
@@ -366,6 +500,8 @@ def train_stage2_regressor(
     lr: float,
     scaler: StandardScaler,
     class_threshold: float,
+    batch_size: int = 16,
+    patience: int = 5,
 ) -> Dict:
     """Stage 2: Freeze classifier, train regressor ONLY on delayed samples."""
     print("\n" + "=" * 80)
@@ -391,63 +527,83 @@ def train_stage2_regressor(
     history = []
     best_val_mae = float('inf')
     best_state = None
+    early_stopping = EarlyStopping(patience=patience, mode='min')
 
-    # Pre-compute which training samples have delays
-    num_sequences = len(train_x)
+    # Pre-filter indices with delays for efficiency
+    delayed_indices = [i for i in range(len(train_x)) if train_y_cls[i].sum() > 0]
+    print(f"Training on {len(delayed_indices)} samples with delays (out of {len(train_x)} total)")
     
     for epoch in range(epochs):
         model.train()
-        perm = torch.randperm(num_sequences)
+        perm = torch.tensor(delayed_indices)[torch.randperm(len(delayed_indices))]
         losses = []
         samples_used = 0
+        num_batches = (len(perm) + batch_size - 1) // batch_size
         
-        for idx in perm:
-            x = train_x[idx].to(device)
-            y_reg = train_y_reg[idx].to(device)
-            y_cls = train_y_cls[idx].to(device)
-
-            # Skip samples with no delays
-            if y_cls.sum() == 0:
-                continue
-
-            data = Data(
-                x=x,
-                edge_index_adj=edge_index_adj,
-                edge_index_od=edge_index_od,
-                edge_index_od_t=edge_index_od_t,
-            )
-
-            # Get classifier predictions (frozen)
-            with torch.no_grad():
-                hidden, logits = model.forward_classifier(data)
-                pred_mask = torch.sigmoid(logits) >= class_threshold
-
-            # Train regressor only on predicted delayed nodes
-            if pred_mask.sum() == 0:
-                continue
-
-            reg_out = model.forward_regressor(hidden)
+        # Process in mini-batches
+        for batch_idx in range(num_batches):
+            start_idx = batch_idx * batch_size
+            end_idx = min(start_idx + batch_size, len(perm))
+            batch_indices = perm[start_idx:end_idx]
             
-            # Compute loss only on nodes predicted as delayed
-            expanded_mask = pred_mask.expand_as(y_reg)
-            loss = reg_loss_fn(reg_out[expanded_mask], y_reg[expanded_mask])
-
             optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            losses.append(loss.item())
-            samples_used += 1
+            batch_loss = 0.0
+            batch_count = 0
+            
+            for idx in batch_indices:
+                x = train_x[idx].to(device)
+                y_reg = train_y_reg[idx].to(device)
+                y_cls = train_y_cls[idx].to(device)
+
+                data = Data(
+                    x=x,
+                    edge_index_adj=edge_index_adj,
+                    edge_index_od=edge_index_od,
+                    edge_index_od_t=edge_index_od_t,
+                )
+
+                # Get classifier predictions (frozen)
+                with torch.no_grad():
+                    hidden, logits = model.forward_classifier(data)
+                    pred_mask = torch.sigmoid(logits) >= class_threshold
+
+                if pred_mask.sum() == 0:
+                    gt_mask = y_cls >= class_threshold
+                    if gt_mask.sum() == 0:
+                        continue
+                    pred_mask = gt_mask
+
+                reg_out = model.forward_regressor(hidden)
+                
+                # Compute loss only on nodes predicted as delayed
+                expanded_mask = pred_mask.expand_as(y_reg)
+                loss = reg_loss_fn(reg_out[expanded_mask], y_reg[expanded_mask])
+                batch_loss += loss
+                batch_count += 1
+            
+            if batch_count > 0:
+                batch_loss = batch_loss / batch_count
+                batch_loss.backward()
+                optimizer.step()
+                losses.append(batch_loss.item())
+                samples_used += batch_count
 
         if len(losses) == 0:
             print(f"Epoch {epoch + 1}/{epochs} | No delayed samples found, skipping")
             continue
 
-        # Validation
+        # Validation - sample subset for speed
+        val_sample_size = min(len(val_x), 100)
+        val_indices = torch.randperm(len(val_x))[:val_sample_size]
+        val_x_sample = val_x[val_indices]
+        val_y_reg_sample = val_y_reg[val_indices]
+        val_y_cls_sample = val_y_cls[val_indices]
+        
         val_metrics = evaluate_stage2(
             model,
-            val_x,
-            val_y_reg,
-            val_y_cls,
+            val_x_sample,
+            val_y_reg_sample,
+            val_y_cls_sample,
             edge_indices,
             device,
             scaler,
@@ -472,9 +628,13 @@ def train_stage2_regressor(
             best_val_mae = val_metrics['mae']
             best_state = model.regressor.state_dict()
             print('  -> New best MAE')
+        
+        # Early stopping check
+        if early_stopping(val_metrics['mae'], epoch + 1):
+            break
 
-    # Load best regressor
-    model.regressor.load_state_dict(best_state)
+    if best_state is not None:
+        model.regressor.load_state_dict(best_state)
     
     print(f"\nStage 2 Complete. Best Val MAE: {best_val_mae:.4f}")
     
@@ -542,57 +702,92 @@ def evaluate_stage2(
 
 def main():
     parser = argparse.ArgumentParser(description='Sequential two-stage KAN-GAT delay predictor')
-    parser.add_argument('--data_dir', type=str, default='cdata')
+    parser.add_argument('--data_source', type=str, default='udata', choices=['cdata', 'udata'],
+                        help='Data source folder: cdata (China) or udata (USA)')
     parser.add_argument('--seq_len', type=int, default=8)
-    parser.add_argument('--horizon', type=int, default=1)
+    parser.add_argument('--horizons', type=int, nargs='+', default=[3, 6, 12],
+                        help='List of step-ahead horizons to train/evaluate (e.g., 3 6 12)')
     parser.add_argument('--stage1_epochs', type=int, default=15, help='Epochs for classifier training')
-    parser.add_argument('--stage2_epochs', type=int, default=10, help='Epochs for regressor training')
+    parser.add_argument('--stage2_epochs', type=int, default=15, help='Epochs for regressor training')
+    parser.add_argument('--batch_size', type=int, default=16, help='Batch size for training')
+    parser.add_argument('--patience', type=int, default=5, help='Early stopping patience')
     parser.add_argument('--lr', type=float, default=0.003)
     parser.add_argument('--delay_threshold', type=float, default=5.0, help='Minutes to tag as delayed')
     parser.add_argument('--class_threshold', type=float, default=0.5)
+    parser.add_argument('--weather_file', type=str, default='weather_cn.npy')
+    parser.add_argument('--period_hours', type=int, default=24)
+    parser.add_argument('--model_path', type=str, default='kan_gat_sequential_best.pth',
+                        help='Destination path for the trained checkpoint (.pth)')
     parser.add_argument('--seed', type=int, default=42)
     args = parser.parse_args()
 
+    if args.data_source == 'udata':
+        args.weather_file = 'weather2016_2021.npy'
+
     set_seed(args.seed)
     device = torch.device('cpu' if torch.cuda.is_available() else 'cpu')
+
+    data_dir = args.data_source
+
+    horizons = sorted({h for h in args.horizons if h > 0})
+    if not horizons:
+        raise ValueError('Please provide at least one positive prediction horizon (e.g., --horizons 3 6 12).')
+    max_horizon = max(horizons)
 
     (
         edge_index_adj,
         edge_index_od,
         edge_index_od_t,
-        train_scaled,
-        val_scaled,
-        test_scaled,
+        train_inputs,
+        val_inputs,
+        test_inputs,
+        train_delay_scaled,
+        val_delay_scaled,
+        test_delay_scaled,
         train_raw,
         val_raw,
         test_raw,
         scaler,
         num_nodes,
-    ) = load_flight_data(args.data_dir)
+    ) = load_flight_data(
+        data_dir,
+        weather_file=args.weather_file,
+        period_hours=args.period_hours,
+        data_source=args.data_source,
+    )
 
-    in_channels = args.seq_len * train_scaled.shape[2]
-    out_channels = args.horizon * train_scaled.shape[2]
+    feature_dim = train_inputs.shape[2]
+    delay_dim = train_delay_scaled.shape[2]
+
+    in_channels = args.seq_len * feature_dim
+    out_channels = len(horizons) * delay_dim
 
     train_x, train_y_reg, train_y_cls = build_sequences(
-        train_scaled,
+        train_inputs,
+        train_delay_scaled,
         train_raw,
         args.seq_len,
-        args.horizon,
+        max_horizon,
         args.delay_threshold,
+        target_horizons=horizons,
     )
     val_x, val_y_reg, val_y_cls = build_sequences(
-        val_scaled,
+        val_inputs,
+        val_delay_scaled,
         val_raw,
         args.seq_len,
-        args.horizon,
+        max_horizon,
         args.delay_threshold,
+        target_horizons=horizons,
     )
     test_x, test_y_reg, test_y_cls = build_sequences(
-        test_scaled,
+        test_inputs,
+        test_delay_scaled,
         test_raw,
         args.seq_len,
-        args.horizon,
+        max_horizon,
         args.delay_threshold,
+        target_horizons=horizons,
     )
 
     edge_index_adj = edge_index_adj.to(device)
@@ -621,6 +816,8 @@ def main():
         args.stage1_epochs,
         args.lr,
         pos_weight,
+        batch_size=args.batch_size,
+        patience=args.patience,
     )
 
     # Stage 2: Train regressor on delayed samples only
@@ -638,9 +835,14 @@ def main():
         args.lr,
         scaler,
         args.class_threshold,
+        batch_size=args.batch_size,
+        patience=args.patience,
     )
 
-    best_model_path = 'kan_gat_sequential_best.pth'
+    best_model_path = args.model_path
+    model_dir = os.path.dirname(best_model_path)
+    if model_dir:
+        os.makedirs(model_dir, exist_ok=True)
     torch.save({
         'encoder': model.encoder.state_dict(),
         'classifier': model.classifier.state_dict(),
@@ -687,31 +889,45 @@ def main():
     gated_preds = test_reg_preds * test_mask
 
     # Denormalize
-    num_features = train_scaled.shape[2]
-    preds_flat = gated_preds.reshape(-1, out_channels)
-    targets_flat = test_y_reg.cpu().numpy().reshape(-1, out_channels)
+    num_forecast_steps = len(horizons)
+    num_features = delay_dim
+    preds_flat = gated_preds.reshape(-1, num_forecast_steps * num_features)
+    targets_flat = test_y_reg.cpu().numpy().reshape(-1, num_forecast_steps * num_features)
     
     test_preds_denorm = scaler.inverse_transform(preds_flat).reshape(gated_preds.shape)
     test_targets_denorm = scaler.inverse_transform(targets_flat).reshape(test_y_reg.shape)
 
     # Reshape for horizon analysis
-    preds_h = test_preds_denorm.reshape(-1, num_nodes, args.horizon, num_features)
-    targets_h = test_targets_denorm.reshape(-1, num_nodes, args.horizon, num_features)
+    preds_h = test_preds_denorm.reshape(-1, num_nodes, num_forecast_steps, num_features)
+    targets_h = test_targets_denorm.reshape(-1, num_nodes, num_forecast_steps, num_features)
 
-    horizon_label = args.horizon
-    arrival_preds = preds_h[:, :, horizon_label - 1, 0]
-    arrival_targets = targets_h[:, :, horizon_label - 1, 0]
-    dep_preds = preds_h[:, :, horizon_label - 1, 1]
-    dep_targets = targets_h[:, :, horizon_label - 1, 1]
+    per_horizon_metrics = {}
+    for idx, horizon in enumerate(horizons):
+        arrival_preds = preds_h[:, :, idx, 0]
+        arrival_targets = targets_h[:, :, idx, 0]
+        dep_preds = preds_h[:, :, idx, 1]
+        dep_targets = targets_h[:, :, idx, 1]
 
-    arr_mae, arr_rmse, arr_r2 = test_error(arrival_preds, arrival_targets)
-    dep_mae, dep_rmse, dep_r2 = test_error(dep_preds, dep_targets)
+        arr_mae, arr_rmse, arr_r2 = test_error(arrival_preds, arrival_targets)
+        dep_mae, dep_rmse, dep_r2 = test_error(dep_preds, dep_targets)
+
+        per_horizon_metrics[horizon] = {
+            'arrival_mae': arr_mae,
+            'arrival_rmse': arr_rmse,
+            'arrival_r2': arr_r2,
+            'departure_mae': dep_mae,
+            'departure_rmse': dep_rmse,
+            'departure_r2': dep_r2,
+        }
+
+        print(f"\n{horizon}-STEP AHEAD PREDICTIONS:")
+        print(f"  Arrival Delay  -> MAE: {arr_mae:.4f} min, RMSE: {arr_rmse:.4f} min, R²: {arr_r2:.4f}")
+        print(f"  Departure Delay -> MAE: {dep_mae:.4f} min, RMSE: {dep_rmse:.4f} min, R²: {dep_r2:.4f}")
 
     # Regression metrics on delayed nodes only
     targets_cls = test_y_cls.cpu().numpy()
     delayed_mask = np.broadcast_to(targets_cls.astype(bool), test_reg_preds.shape)
     test_reg_metrics = regression_metrics(test_preds_denorm, test_targets_denorm, delayed_mask)
-
     print("\nCLASSIFICATION PERFORMANCE:")
     print(f"  Precision: {test_cls_metrics['precision']:.4f}")
     print(f"  Recall: {test_cls_metrics['recall']:.4f}")
@@ -721,10 +937,6 @@ def main():
     print("\nREGRESSION PERFORMANCE (on delayed nodes):")
     print(f"  MAE: {test_reg_metrics['mae']:.4f} min")
     print(f"  RMSE: {test_reg_metrics['rmse']:.4f} min")
-
-    print(f"\n{horizon_label}-STEP AHEAD PREDICTIONS:")
-    print(f"  Arrival Delay  -> MAE: {arr_mae:.4f} min, RMSE: {arr_rmse:.4f} min, R²: {arr_r2:.4f}")
-    print(f"  Departure Delay -> MAE: {dep_mae:.4f} min, RMSE: {dep_rmse:.4f} min, R²: {dep_r2:.4f}")
     print("=" * 80)
 
     # Save results
@@ -741,22 +953,23 @@ def main():
             writer.writeheader()
             writer.writerows(normalized_rows)
 
-    test_metrics = {
-        **test_cls_metrics,
-        **test_reg_metrics,
-        'arrival_mae': arr_mae,
-        'arrival_rmse': arr_rmse,
-        'arrival_r2': arr_r2,
-        'departure_mae': dep_mae,
-        'departure_rmse': dep_rmse,
-        'departure_r2': dep_r2,
-    }
-
     with open('kan_gat_sequential_test_summary.csv', 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(['metric', 'value'])
-        for key, value in test_metrics.items():
+        for key, value in {
+            'classification_precision': test_cls_metrics['precision'],
+            'classification_recall': test_cls_metrics['recall'],
+            'classification_f1': test_cls_metrics['f1'],
+            'classification_accuracy': test_cls_metrics['accuracy'],
+            'regression_mae_delayed': test_reg_metrics['mae'],
+            'regression_rmse_delayed': test_reg_metrics['rmse'],
+        }.items():
             writer.writerow([key, value])
+
+        for horizon in horizons:
+            metrics = per_horizon_metrics[horizon]
+            for metric_name, metric_value in metrics.items():
+                writer.writerow([f"{metric_name}_h{horizon}", metric_value])
 
     print("\nTraining complete. Results saved.")
 

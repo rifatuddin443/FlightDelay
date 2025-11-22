@@ -1,0 +1,1 @@
+epoch,training_loss,validation_loss,validation_mae,validation_r2,validation_rmse,epsilon,learning_rate,epoch_time

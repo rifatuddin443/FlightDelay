@@ -208,7 +208,8 @@ parser.add_argument('--in_len', type=int, default=12, help='input time series le
 parser.add_argument('--out_len', type=int, default=12, help='output time series length')
 parser.add_argument('--period', type=int, default=36, help='periodic for temporal embedding')
 parser.add_argument('--hidden_dim', type=int, default=64, help='hidden dimension')
-parser.add_argument('--model_path', type=str, default='./results/optimized_dsafnet_US.pth', help='path to saved model')
+parser.add_argument('--model_path', type=str, default='optimized_dsafnet_US.pth', help='path to saved model')
+#parser.add_argument('--model_path', type=str, default='./results/optimized_dsafnet_US.pth', help='path to saved model')
 parser.add_argument('--out_csv', type=str, default='./results/dsaftest_full_fixed_results.csv', help='path to write CSV results')
 
 args = parser.parse_args()

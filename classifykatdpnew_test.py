@@ -177,7 +177,7 @@ def _load_model_with_dp_metadata(
         hidden_channels=hidden_channels,
     ).to(device)
 
-    checkpoint = torch.load(model_path, map_location=device)
+    checkpoint = torch.load(model_path, map_location=device, weights_only=False)
     
     # Load model weights
     if all(key in checkpoint for key in ("encoder", "classifier", "regressor")):

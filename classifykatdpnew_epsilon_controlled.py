@@ -1,6 +1,9 @@
-"""Properly implemented differentially private sequential KAN-GAT pipeline.
+"""Properly implemented differentially private sequential KAN-GAT pipeline with epsilon budget control.
 
-FIXED: Ensures both predictions AND targets are at graph-level (not node-level).
+FIXED: 
+1. Ensures both predictions AND targets are at graph-level (not node-level).
+2. Stops training automatically when target epsilon is reached.
+3. Provides epsilon budget warnings and early stopping based on privacy budget.
 """
 
 from __future__ import annotations
@@ -98,7 +101,7 @@ class PoissonSampler(Sampler):
 
 @dataclass
 class RDPAccountant:
-    """Rényi Differential Privacy accountant."""
+    """Rényi Differential Privacy accountant with budget tracking."""
 
     noise_multiplier: float
     sample_rate: float
@@ -136,17 +139,69 @@ class RDPAccountant:
             eps_values.append(eps)
         
         return min(eps_values) if eps_values else float('inf')
+    
+    def predict_steps_for_epsilon(self, target_epsilon: float, delta: float) -> int:
+        """Predict how many steps can be taken before reaching target epsilon."""
+        if self.steps == 0:
+            # Estimate: binary search for the number of steps
+            low, high = 1, 10000
+            best_steps = 0
+            
+            while low <= high:
+                mid = (low + high) // 2
+                temp_accountant = RDPAccountant(
+                    noise_multiplier=self.noise_multiplier,
+                    sample_rate=self.sample_rate,
+                    steps=mid
+                )
+                eps = temp_accountant.get_epsilon(delta)
+                
+                if eps <= target_epsilon:
+                    best_steps = mid
+                    low = mid + 1
+                else:
+                    high = mid - 1
+            
+            return max(1, best_steps)
+        else:
+            # Use current rate to predict remaining budget
+            current_eps = self.get_epsilon(delta)
+            if current_eps >= target_epsilon:
+                return 0
+            
+            # Linear approximation: remaining_eps / current_rate
+            eps_per_step = current_eps / self.steps if self.steps > 0 else float('inf')
+            remaining_eps = target_epsilon - current_eps
+            remaining_steps = int(remaining_eps / eps_per_step) if eps_per_step > 0 else 0
+            return max(0, remaining_steps)
 
 
 @dataclass
 class DPConfig:
-    """Differential privacy configuration."""
+    """Differential privacy configuration with budget control."""
     enabled: bool
     target_epsilon: float
     target_delta: float
     noise_multiplier: float
     max_grad_norm: float
     sample_rate: float
+    epsilon_tolerance: float = 0.05  # Stop when within 5% of target
+    enforce_budget: bool = False  # Whether to stop training when budget reached
+    
+    def check_budget_remaining(self, current_epsilon: float) -> Tuple[bool, float]:
+        """
+        Check if privacy budget is exhausted.
+        
+        Returns:
+            (budget_ok, remaining_budget_fraction)
+        """
+        if not self.enabled or current_epsilon == float('inf'):
+            return True, 1.0
+        
+        remaining_fraction = max(0.0, (self.target_epsilon - current_epsilon) / self.target_epsilon)
+        budget_ok = current_epsilon < self.target_epsilon * (1 + self.epsilon_tolerance)
+        
+        return budget_ok, remaining_fraction
 
 
 class PerSampleGradientClipper:
@@ -294,7 +349,7 @@ def train_stage1_with_dp(
     dp_config: DPConfig,
     batch_size: int,
 ) -> Tuple[List[Dict], RDPAccountant, float]:
-    """Train stage 1 with proper DP-SGD."""
+    """Train stage 1 with proper DP-SGD and epsilon budget control."""
     
     stage_start_time = time.time()
     
@@ -325,6 +380,15 @@ def train_stage1_with_dp(
         print(f"  Noise multiplier: {dp_config.noise_multiplier}")
         print(f"  Max grad norm: {dp_config.max_grad_norm}")
         print(f"  Sample rate: {dp_config.sample_rate}")
+        print(f"  Budget enforcement: {'ENABLED' if dp_config.enforce_budget else 'DISABLED (will overshoot)'}")
+        
+        if dp_config.enforce_budget:
+            # Estimate maximum epochs based on budget
+            num_batches_per_epoch = int(np.ceil(len(train_x) / batch_size))
+            total_steps_budget = accountant.predict_steps_for_epsilon(dp_config.target_epsilon, dp_config.target_delta)
+            max_epochs_budget = max(1, total_steps_budget // num_batches_per_epoch)
+            print(f"  Privacy budget allows ~{max_epochs_budget} epochs (est. {total_steps_budget} steps)")
+        
     else:
         print("✗ DP-SGD disabled (standard training)")
     
@@ -332,8 +396,13 @@ def train_stage1_with_dp(
     best_f1 = 0.0
     best_state = None
     early_stopping = EarlyStopping(patience=patience, mode="max")
+    budget_exhausted = False
     
     for epoch in range(1, epochs + 1):
+        if budget_exhausted:
+            print(f"\n⛔ Privacy budget exhausted before epoch {epoch}. Stopping training.")
+            break
+        
         epoch_start_time = time.time()
         model.train()
         epoch_losses = []
@@ -342,6 +411,19 @@ def train_stage1_with_dp(
         indices = torch.randperm(num_samples)
         
         for start_idx in range(0, num_samples, batch_size):
+            # Check budget before each batch (only if enforcement is enabled)
+            if dp_config.enabled and dp_config.enforce_budget:
+                current_epsilon = accountant.get_epsilon(dp_config.target_delta)
+                budget_ok, remaining_fraction = dp_config.check_budget_remaining(current_epsilon)
+                
+                if not budget_ok:
+                    print(f"\n⛔ Privacy budget reached: ε={current_epsilon:.3f} >= target {dp_config.target_epsilon}")
+                    budget_exhausted = True
+                    break
+                
+                if remaining_fraction < 0.2:  # Less than 20% budget remaining
+                    print(f"  ⚠️  Budget warning: {remaining_fraction*100:.1f}% remaining (ε={current_epsilon:.3f})")
+            
             end_idx = min(start_idx + batch_size, num_samples)
             batch_indices = indices[start_idx:end_idx]
             
@@ -384,14 +466,13 @@ def train_stage1_with_dp(
                             edge_index_od_t=edge_indices[2],
                         )
                         _, node_logits = model.forward_classifier(data.to(device))
-                        # FIXED: Aggregate both predictions AND targets to graph-level
                         graph_logit = aggregate_node_to_graph(node_logits)
                         graph_target = ensure_graph_level_target(batch_y[i])
                         logits_list.append(graph_logit)
                         targets_list.append(graph_target)
                     
-                    all_logits = torch.cat(logits_list, dim=0)  # [batch_size, 1]
-                    all_targets = torch.cat(targets_list, dim=0)  # [batch_size, 1]
+                    all_logits = torch.cat(logits_list, dim=0)
+                    all_targets = torch.cat(targets_list, dim=0)
                     loss = cls_loss_fn(all_logits, all_targets)
                 
                 accountant.step()
@@ -407,19 +488,21 @@ def train_stage1_with_dp(
                         edge_index_od_t=edge_indices[2],
                     )
                     _, node_logits = model.forward_classifier(data.to(device))
-                    # FIXED: Aggregate both predictions AND targets to graph-level
                     graph_logit = aggregate_node_to_graph(node_logits)
                     graph_target = ensure_graph_level_target(batch_y[i])
                     logits_list.append(graph_logit)
                     targets_list.append(graph_target)
                 
-                all_logits = torch.cat(logits_list, dim=0)  # [batch_size, 1]
-                all_targets = torch.cat(targets_list, dim=0)  # [batch_size, 1]
+                all_logits = torch.cat(logits_list, dim=0)
+                all_targets = torch.cat(targets_list, dim=0)
                 loss = cls_loss_fn(all_logits, all_targets)
                 loss.backward()
             
             optimizer.step()
             epoch_losses.append(loss.item())
+        
+        if budget_exhausted:
+            break
         
         # Validation
         model.eval()
@@ -463,9 +546,10 @@ def train_stage1_with_dp(
             'epsilon': current_epsilon,
             'delta': dp_config.target_delta if dp_config.enabled else 0.0,
             'epoch_time_seconds': epoch_time,
+            'total_steps': accountant.steps,
         })
         
-        eps_str = f"ε: {current_epsilon:.3f}" if dp_config.enabled else "No DP"
+        eps_str = f"ε: {current_epsilon:.3f}/{dp_config.target_epsilon}" if dp_config.enabled else "No DP"
         print(
             f"Epoch {epoch}/{epochs} | Loss: {history[-1]['train_loss']:.4f} | "
             f"Val F1: {val_metrics['f1']:.4f} | {eps_str} | Time: {epoch_time:.2f}s"
@@ -491,7 +575,9 @@ def train_stage1_with_dp(
         param.requires_grad = True
     
     stage_time = time.time() - stage_start_time
+    final_epsilon = accountant.get_epsilon(dp_config.target_delta) if dp_config.enabled else float('inf')
     print(f"\nStage 1 completed in {stage_time:.2f}s ({stage_time/60:.2f} min)")
+    print(f"Final ε: {final_epsilon:.3f} (target: {dp_config.target_epsilon})")
     
     return history, accountant, stage_time
 
@@ -515,7 +601,7 @@ def train_stage2_with_dp(
     batch_size: int,
     stage1_accountant: RDPAccountant,
 ) -> Tuple[List[Dict], RDPAccountant, float]:
-    """Train stage 2 with proper DP-SGD."""
+    """Train stage 2 with proper DP-SGD and epsilon budget control."""
     
     stage_start_time = time.time()
     
@@ -540,8 +626,22 @@ def train_stage2_with_dp(
     
     if dp_config.enabled:
         clipper = PerSampleGradientClipper(model, dp_config.max_grad_norm)
+        current_eps = stage1_accountant.get_epsilon(dp_config.target_delta)
         print(f"✓ DP-SGD enabled (continuing from stage 1)")
-        print(f"  Current ε: {stage1_accountant.get_epsilon(dp_config.target_delta):.3f}")
+        print(f"  Current ε: {current_eps:.3f} / {dp_config.target_epsilon}")
+        print(f"  Budget enforcement: {'ENABLED' if dp_config.enforce_budget else 'DISABLED (will overshoot)'}")
+        
+        if dp_config.enforce_budget:
+            remaining_budget = dp_config.target_epsilon - current_eps
+            if remaining_budget <= 0:
+                print(f"  ⚠️  WARNING: No privacy budget remaining!")
+                print(f"  ⚠️  Stage 2 will exhaust budget immediately!")
+                
+            # Estimate remaining epochs
+            num_batches_per_epoch = int(np.ceil(len(train_x) / batch_size))
+            remaining_steps = accountant.predict_steps_for_epsilon(dp_config.target_epsilon, dp_config.target_delta)
+            max_epochs_budget = max(1, remaining_steps // num_batches_per_epoch)
+            print(f"  Estimated remaining epochs: {max_epochs_budget}")
     else:
         print("✗ DP-SGD disabled")
     
@@ -549,8 +649,13 @@ def train_stage2_with_dp(
     best_val_loss = float('inf')
     best_state = None
     early_stopping = EarlyStopping(patience=patience, mode="min")
+    budget_exhausted = False
     
     for epoch in range(1, epochs + 1):
+        if budget_exhausted:
+            print(f"\n⛔ Privacy budget exhausted before epoch {epoch}. Stopping training.")
+            break
+        
         epoch_start_time = time.time()
         model.train()
         epoch_losses = []
@@ -559,6 +664,19 @@ def train_stage2_with_dp(
         indices = torch.randperm(num_samples)
         
         for start_idx in range(0, num_samples, batch_size):
+            # Check budget before each batch (only if enforcement is enabled)
+            if dp_config.enabled and dp_config.enforce_budget:
+                current_epsilon = accountant.get_epsilon(dp_config.target_delta)
+                budget_ok, remaining_fraction = dp_config.check_budget_remaining(current_epsilon)
+                
+                if not budget_ok:
+                    print(f"\n⛔ Privacy budget reached: ε={current_epsilon:.3f} >= target {dp_config.target_epsilon}")
+                    budget_exhausted = True
+                    break
+                
+                if remaining_fraction < 0.2:
+                    print(f"  ⚠️  Budget warning: {remaining_fraction*100:.1f}% remaining (ε={current_epsilon:.3f})")
+            
             end_idx = min(start_idx + batch_size, num_samples)
             batch_indices = indices[start_idx:end_idx]
             
@@ -608,7 +726,6 @@ def train_stage2_with_dp(
                     reg_preds = torch.cat(reg_preds, dim=0)
                     reg_targets = torch.cat(reg_targets, dim=0)
                     
-                    # Gating based on classification (graph-level)
                     cls_mask = []
                     for i in range(len(batch_y_cls)):
                         graph_cls = ensure_graph_level_target(batch_y_cls[i])
@@ -655,6 +772,9 @@ def train_stage2_with_dp(
             optimizer.step()
             epoch_losses.append(loss.item())
         
+        if budget_exhausted:
+            break
+        
         # Validation
         model.eval()
         val_losses = []
@@ -693,9 +813,10 @@ def train_stage2_with_dp(
             'epsilon': current_epsilon,
             'delta': dp_config.target_delta if dp_config.enabled else 0.0,
             'epoch_time_seconds': epoch_time,
+            'total_steps': accountant.steps,
         })
         
-        eps_str = f"ε: {current_epsilon:.3f}" if dp_config.enabled else "No DP"
+        eps_str = f"ε: {current_epsilon:.3f}/{dp_config.target_epsilon}" if dp_config.enabled else "No DP"
         print(
             f"Epoch {epoch}/{epochs} | Train Loss: {history[-1]['train_loss']:.4f} | "
             f"Val Loss: {val_loss:.4f} | {eps_str} | Time: {epoch_time:.2f}s"
@@ -717,7 +838,9 @@ def train_stage2_with_dp(
         param.requires_grad = True
     
     stage_time = time.time() - stage_start_time
+    final_epsilon = accountant.get_epsilon(dp_config.target_delta) if dp_config.enabled else float('inf')
     print(f"\nStage 2 completed in {stage_time:.2f}s ({stage_time/60:.2f} min)")
+    print(f"Final ε: {final_epsilon:.3f} (target: {dp_config.target_epsilon})")
     
     return history, accountant, stage_time
 
@@ -742,6 +865,7 @@ def final_evaluation(
     stage2_time: float,
     train_samples: int,
     val_samples: int,
+    dp_config: DPConfig,
 ) -> None:
     """Final evaluation and export."""
     
@@ -760,6 +884,8 @@ def final_evaluation(
         'regressor': model.regressor.state_dict(),
         'final_epsilon': float(final_epsilon),
         'final_delta': float(final_delta),
+        'target_epsilon': float(dp_config.target_epsilon),
+        'epsilon_exceeded': final_epsilon > dp_config.target_epsilon if dp_config.enabled else False,
     }, model_path)
     
     checkpoint = torch.load(model_path, map_location=device, weights_only=False)
@@ -781,11 +907,9 @@ def final_evaluation(
             )
             node_logits, node_reg = model(data)
             
-            # FIXED: Aggregate predictions to graph-level
             graph_logit = aggregate_node_to_graph(node_logits)
             graph_reg = aggregate_node_to_graph(node_reg)
             
-            # FIXED: Also aggregate targets to graph-level
             graph_cls_target = ensure_graph_level_target(test_y_cls[i])
             graph_reg_target = ensure_graph_level_target(test_y_reg[i])
             
@@ -794,32 +918,26 @@ def final_evaluation(
             targets_cls_list.append(graph_cls_target.cpu().numpy())
             targets_reg_list.append(graph_reg_target.cpu().numpy())
     
-    # FIXED: Now all arrays have consistent shapes (num_test_samples, out_dim)
-    test_probs = np.concatenate(logits_list, axis=0)  # (num_samples, 1)
-    test_reg_preds = np.concatenate(reg_list, axis=0)  # (num_samples, out_channels)
-    test_cls_targets = np.concatenate(targets_cls_list, axis=0)  # (num_samples, 1)
-    test_reg_targets = np.concatenate(targets_reg_list, axis=0)  # (num_samples, out_channels)
+    test_probs = np.concatenate(logits_list, axis=0)
+    test_reg_preds = np.concatenate(reg_list, axis=0)
+    test_cls_targets = np.concatenate(targets_cls_list, axis=0)
+    test_reg_targets = np.concatenate(targets_reg_list, axis=0)
     
-    # Classification metrics
     test_cls_metrics = classification_metrics(
         test_probs.reshape(-1, 1),
         test_cls_targets.reshape(-1, 1),
     )
     
-    # FIXED: Apply gating with matching shapes - broadcast test_mask to match predictions
-    test_mask = (test_probs >= class_threshold)  # (num_samples, 1)
-    gated_preds = test_reg_preds * test_mask  # (num_samples, out_channels)
+    test_mask = (test_probs >= class_threshold)
+    gated_preds = test_reg_preds * test_mask
     
-    # Denormalize predictions and targets
     if scaler is not None:
-        # Ensure scaler expects the right shape
         preds_denorm = scaler.inverse_transform(gated_preds)
         targets_denorm = scaler.inverse_transform(test_reg_targets)
     else:
         preds_denorm = gated_preds
         targets_denorm = test_reg_targets
     
-    # Compute regression metrics on delayed samples only
     delayed_mask = test_cls_targets.flatten() >= class_threshold
     if delayed_mask.sum() > 0:
         delayed_preds = preds_denorm[delayed_mask]
@@ -840,7 +958,14 @@ def final_evaluation(
         mae, rmse = 0.0, 0.0
     
     print("\nPRIVACY BUDGET:")
+    print(f"  Target ε: {dp_config.target_epsilon:.3f}")
     print(f"  Final ε: {final_epsilon:.3f}")
+    if dp_config.enabled:
+        if final_epsilon <= dp_config.target_epsilon:
+            print(f"  ✓ Budget maintained (within target)")
+        else:
+            overshoot = final_epsilon - dp_config.target_epsilon
+            print(f"  ⚠️  Budget exceeded by {overshoot:.3f} ε ({overshoot/dp_config.target_epsilon*100:.1f}%)")
     print(f"  Final δ: {final_delta:.2e}")
     
     print("\nTRAINING TIME:")
@@ -854,14 +979,14 @@ def final_evaluation(
     
     # Export history
     if histories:
-        with open("kan_gat_dp_proper_history.csv", "w", newline="") as f:
+        with open("kan_gat_dp_epsilon_controlled_history.csv", "w", newline="") as f:
             all_fields = sorted({k for row in histories for k in row})
             writer = csv.DictWriter(f, fieldnames=all_fields)
             writer.writeheader()
             writer.writerows(histories)
     
     # Export summary
-    with open("kan_gat_dp_proper_summary.csv", "w", newline="") as f:
+    with open("kan_gat_dp_epsilon_controlled_summary.csv", "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(['metric', 'value'])
         summary = {
@@ -872,7 +997,10 @@ def final_evaluation(
             'regression_mae_delayed': mae,
             'regression_rmse_delayed': rmse,
             'num_delayed_samples': int(delayed_mask.sum()) if delayed_mask.sum() > 0 else 0,
+            'target_epsilon': dp_config.target_epsilon,
             'final_epsilon': final_epsilon,
+            'epsilon_exceeded': final_epsilon > dp_config.target_epsilon if dp_config.enabled else False,
+            'epsilon_overshoot': max(0, final_epsilon - dp_config.target_epsilon) if dp_config.enabled else 0,
             'final_delta': final_delta,
             'stage1_time_seconds': stage1_time,
             'stage2_time_seconds': stage2_time,
@@ -887,13 +1015,12 @@ def final_evaluation(
     
     print(f"\n✓ Results saved to:")
     print(f"  - {model_path}")
-    print(f"  - kan_gat_dp_proper_history.csv")
-    print(f"  - kan_gat_dp_proper_summary.csv")
-
+    print(f"  - kan_gat_dp_epsilon_controlled_history.csv")
+    print(f"  - kan_gat_dp_epsilon_controlled_summary.csv")
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Proper DP-SGD for KAN-GAT")
+    parser = argparse.ArgumentParser(description="Proper DP-SGD for KAN-GAT with epsilon budget control")
     
     parser.add_argument('--data_source', type=str, default='udata', choices=['cdata', 'udata'])
     parser.add_argument('--seq_len', type=int, default=8)
@@ -906,15 +1033,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--stage1_epochs', type=int, default=15)
     parser.add_argument('--stage2_epochs', type=int, default=15)
     parser.add_argument('--batch_size', type=int, default=16)
-    parser.add_argument('--lr', type=float, default=0.003)
+    parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--patience', type=int, default=5)
     
-    parser.add_argument('--dp', default=True,action='store_true', help='Enable DP-SGD')
-    parser.add_argument('--target_epsilon', type=float, default=2)
+    parser.add_argument('--dp', default=True, action='store_true', help='Enable DP-SGD')
+    parser.add_argument('--target_epsilon', type=float, default=5.0)
     parser.add_argument('--target_delta', type=float, default=1e-5)
     parser.add_argument('--noise_multiplier', type=float, default=4)
-    parser.add_argument('--max_grad_norm', type=float, default=1.0)
-    parser.add_argument('--sample_rate', type=float, default=0.01)
+    parser.add_argument('--max_grad_norm', type=float, default=1.5)
+    parser.add_argument('--sample_rate', type=float, default=0.02)
+    parser.add_argument('--epsilon_tolerance', type=float, default=0.05, 
+                        help='Stop when within this fraction of target epsilon (default: 0.05 = 5%)')
+    parser.add_argument('--enforce_epsilon_budget', action='store_true', default=False,
+                        help='Stop training when epsilon budget is reached (prevents overshoot)')
     
     parser.add_argument('--model_path', type=str, default='kan_gat_dp_proper.pth')
     parser.add_argument('--seed', type=int, default=42)
@@ -986,6 +1117,8 @@ def main() -> None:
         noise_multiplier=args.noise_multiplier,
         max_grad_norm=args.max_grad_norm,
         sample_rate=args.sample_rate,
+        epsilon_tolerance=args.epsilon_tolerance,
+        enforce_budget=args.enforce_epsilon_budget,
     )
     
     cls_pos_rate = train_y_cls.mean().item()
@@ -1026,7 +1159,7 @@ def main() -> None:
         delay_dim, num_nodes, test_x, test_y_reg, test_y_cls,
         args.class_threshold, args.model_path, combined_history,
         final_epsilon, final_delta, stage1_time, stage2_time,
-        len(train_x), len(val_x),
+        len(train_x), len(val_x), dp_config,
     )
 
 

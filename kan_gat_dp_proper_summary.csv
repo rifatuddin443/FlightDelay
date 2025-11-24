@@ -1,0 +1,17 @@
+metric,value
+classification_precision,0.9999999999991879
+classification_recall,0.781196472752153
+classification_f1,0.8771592357344392
+classification_accuracy,0.781196472752153
+regression_mae_delayed,4.258299
+regression_rmse_delayed,5.3541493
+num_delayed_samples,15763
+final_epsilon,3.0303552858283713
+final_delta,1e-05
+stage1_time_seconds,606.4704256057739
+stage2_time_seconds,491.10727405548096
+total_training_time_seconds,1097.5776996612549
+total_training_time_minutes,18.292961661020914
+train_samples,55218
+val_samples,7871
+test_samples,15763

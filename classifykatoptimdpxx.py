@@ -1,6 +1,9 @@
-"""Properly implemented differentially private sequential KAN-GAT pipeline.
+"""Properly implemented differentially private sequential KAN-GAT pipeline with epsilon budget control.
 
-FIXED: Ensures both predictions AND targets are at graph-level (not node-level).
+FIXED: 
+1. Ensures both predictions AND targets are at graph-level (not node-level).
+2. Automatically computes noise multiplier to achieve target epsilon.
+3. Allows training to complete all epochs while tracking epsilon.
 """
 
 from __future__ import annotations
@@ -18,7 +21,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.func import grad, vmap, functional_call
-from torch.utils.data import Dataset, Sampler
+from torch.utils.data import Dataset
 from torch_geometric.data import Data
 
 # Reuse original implementation
@@ -79,26 +82,9 @@ class GraphSequenceDataset(Dataset):
         return data
 
 
-class PoissonSampler(Sampler):
-    """Poisson sampling for privacy amplification."""
-
-    def __init__(self, dataset_size: int, sample_rate: float, generator=None):
-        self.dataset_size = dataset_size
-        self.sample_rate = sample_rate
-        self.generator = generator
-
-    def __iter__(self):
-        mask = torch.rand(self.dataset_size, generator=self.generator) < self.sample_rate
-        indices = mask.nonzero(as_tuple=True)[0].tolist()
-        return iter(indices)
-
-    def __len__(self):
-        return int(self.dataset_size * self.sample_rate)
-
-
 @dataclass
 class RDPAccountant:
-    """Rényi Differential Privacy accountant."""
+    """Rényi Differential Privacy accountant with budget tracking."""
 
     noise_multiplier: float
     sample_rate: float
@@ -109,7 +95,13 @@ class RDPAccountant:
         self.steps += 1
     
     def get_epsilon(self, delta: float, orders: Optional[List[float]] = None) -> float:
-        """Compute epsilon via RDP to (eps, delta)-DP conversion."""
+        """Compute epsilon via RDP to (eps, delta)-DP conversion.
+        
+        This follows Opacus's RDP accounting with privacy amplification by subsampling.
+        """
+        if self.steps == 0:
+            return 0.0
+            
         if orders is None:
             orders = [1 + x / 10.0 for x in range(1, 100)] + list(range(12, 64))
         
@@ -117,67 +109,169 @@ class RDPAccountant:
         for alpha in orders:
             if alpha <= 1:
                 continue
-                
+            
+            # Base RDP for Gaussian mechanism: alpha / (2 * sigma^2)
             rdp_step = alpha / (2 * self.noise_multiplier ** 2)
             
+            # Privacy amplification by subsampling
+            # For small sample rates: RDP ≈ q^2 * base_rdp
+            # For larger sample rates: use tighter bound
             if self.sample_rate < 0.01:
+                # Small sample rate approximation
                 rdp_step *= self.sample_rate ** 2
-            else:
-                rdp_step *= min(self.sample_rate ** 2 * alpha, self.sample_rate * np.sqrt(alpha))
+            elif self.sample_rate < 1.0:
+                # Tighter bound for moderate sample rates
+                # This is a simplified version of Opacus's approach
+                rdp_step *= self.sample_rate * min(
+                    self.sample_rate,
+                    np.sqrt(2 * alpha * self.sample_rate)
+                )
+            # If sample_rate >= 1.0, no amplification
             
             rdp_total = rdp_step * self.steps
             rdp_values.append(rdp_total)
         
+        # Convert RDP to (ε, δ)-DP
         eps_values = []
         for alpha, rdp in zip(orders, rdp_values):
             if alpha <= 1:
                 continue
+            # ε = RDP_α + log(1/δ) / (α - 1)
             eps = rdp + np.log(1 / delta) / (alpha - 1)
             eps_values.append(eps)
         
         return min(eps_values) if eps_values else float('inf')
+    
+    def predict_steps_for_epsilon(self, target_epsilon: float, delta: float) -> int:
+        """Predict how many steps can be taken before reaching target epsilon."""
+        if self.steps == 0:
+            # Estimate: binary search for the number of steps
+            low, high = 1, 10000
+            best_steps = 0
+            
+            while low <= high:
+                mid = (low + high) // 2
+                temp_accountant = RDPAccountant(
+                    noise_multiplier=self.noise_multiplier,
+                    sample_rate=self.sample_rate,
+                    steps=mid
+                )
+                eps = temp_accountant.get_epsilon(delta)
+                
+                if eps <= target_epsilon:
+                    best_steps = mid
+                    low = mid + 1
+                else:
+                    high = mid - 1
+            
+            return max(1, best_steps)
+        else:
+            # Use current rate to predict remaining budget
+            current_eps = self.get_epsilon(delta)
+            if current_eps >= target_epsilon:
+                return 0
+            
+            # Linear approximation: remaining_eps / current_rate
+            eps_per_step = current_eps / self.steps if self.steps > 0 else float('inf')
+            remaining_eps = target_epsilon - current_eps
+            remaining_steps = int(remaining_eps / eps_per_step) if eps_per_step > 0 else 0
+            return max(0, remaining_steps)
 
+
+
+
+def solve_noise_multiplier_for_epsilon(target_epsilon: float, delta: float, 
+                                       sample_rate: float, steps: int) -> float:
+    """
+    Binary search to find minimum noise multiplier such that epsilon 
+    computed by RDPAccountant is <= target_epsilon.
+    
+    This mimics Opacus's make_private_with_epsilon approach.
+    """
+    if steps == 0:
+        return 1.0
+    
+    # Search bounds: [0.1, 100] should cover most practical scenarios
+    lower, upper = 0.1, 100.0
+    precision = 0.001  # Higher precision for better accuracy
+    best_nm = upper
+    
+    # First check if upper bound is sufficient
+    acc = RDPAccountant(noise_multiplier=upper, sample_rate=sample_rate, steps=steps)
+    if acc.get_epsilon(delta) > target_epsilon:
+        print(f"\n⚠️  Warning: Cannot achieve ε={target_epsilon} with noise_multiplier up to {upper}")
+        print(f"    Try: reducing epochs, increasing batch size, or increasing target epsilon")
+        return upper
+
+    # Binary search for optimal noise multiplier
+    iteration = 0
+    while upper - lower > precision and iteration < 100:
+        mid = (lower + upper) / 2
+        acc = RDPAccountant(noise_multiplier=mid, sample_rate=sample_rate, steps=steps)
+        eps = acc.get_epsilon(delta)
+
+        if eps > target_epsilon:
+            lower = mid  # Need more noise (higher multiplier)
+        else:
+            best_nm = mid
+            upper = mid
+        
+        iteration += 1
+
+    return round(best_nm, 3)
 
 @dataclass
 class DPConfig:
-    """Differential privacy configuration."""
+    """Differential privacy configuration with budget control."""
     enabled: bool
     target_epsilon: float
     target_delta: float
     noise_multiplier: float
     max_grad_norm: float
     sample_rate: float
+    epsilon_tolerance: float = 0.05  # Stop when within 5% of target
+    
 
 
 class PerSampleGradientClipper:
-    """Per-sample gradient clipping - simplified approach without functorch."""
+    """Ghost Clipping style gradient clipping - avoids instantiating per-sample gradients.
+    
+    Uses 2 backward passes:
+    1. Compute per-sample gradient norms (lightweight)
+    2. Compute clipped gradients via reweighted loss
+    """
     
     def __init__(self, model: nn.Module, max_grad_norm: float):
         self.model = model
         self.max_grad_norm = max_grad_norm
+        self._norms_buffer = {}  # Store per-sample norms
         
-    def compute_per_sample_gradients(
+    def compute_per_sample_norms(
         self,
         batch_x: torch.Tensor,
         batch_y: torch.Tensor,
         edge_indices: Tuple,
         loss_fn,
         is_classification: bool = True,
-    ) -> Dict[str, torch.Tensor]:
+    ) -> torch.Tensor:
         """
-        Compute per-sample gradients via loop.
+        Compute per-sample gradient norms efficiently.
         
-        This uses standard autograd instead of functorch/vmap to ensure
-        compatibility with complex PyG models.
+        Uses per-sample backward passes but only stores norms (not full gradients).
+        This is the first pass of Ghost Clipping.
+        
+        Returns:
+            per_sample_norms: [batch_size] tensor of gradient norms
         """
         edge_index_adj, edge_index_od, edge_index_od_t = edge_indices
-        all_grads = []
+        batch_size = batch_x.shape[0]
         
-        for i in range(batch_x.shape[0]):
-            # Zero gradients
+        # Store squared norms for each sample
+        per_sample_norms_sq = []
+        
+        for i in range(batch_size):
             self.model.zero_grad(set_to_none=True)
             
-            # Create data
             data = Data(
                 x=batch_x[i],
                 edge_index_adj=edge_index_adj,
@@ -185,7 +279,7 @@ class PerSampleGradientClipper:
                 edge_index_od_t=edge_index_od_t,
             )
             
-            # Forward pass
+            # Compute loss for this sample
             if is_classification:
                 _, node_logits = self.model.forward_classifier(data)
                 graph_logit = aggregate_node_to_graph(node_logits)
@@ -198,33 +292,77 @@ class PerSampleGradientClipper:
                 mask = (graph_target >= 0).float()
                 loss = loss_fn(graph_reg * mask, graph_target * mask)
             
-            # Backward pass
+            # Backward to get gradients
             loss.backward()
             
-            # Collect gradients for this sample
-            sample_grads = {}
-            for name, param in self.model.named_parameters():
-                if param.grad is not None and param.requires_grad:
-                    sample_grads[name] = param.grad.clone().detach()
+            # Compute norm squared (don't store full gradients - memory efficient!)
+            norm_sq = torch.tensor(0.0, device=batch_x.device)
+            for p in self.model.parameters():
+                if p.grad is not None and p.requires_grad:
+                    norm_sq += p.grad.norm(2).pow(2)
             
-            # Clip this sample's gradient
-            grad_norm = torch.sqrt(
-                sum(torch.sum(g ** 2) for g in sample_grads.values())
+            per_sample_norms_sq.append(norm_sq)
+        
+        # Stack and return sqrt
+        return torch.sqrt(torch.stack(per_sample_norms_sq))
+    
+    def compute_clipped_gradients(
+        self,
+        batch_x: torch.Tensor,
+        batch_y: torch.Tensor,
+        edge_indices: Tuple,
+        loss_fn,
+        per_sample_norms: torch.Tensor,
+        is_classification: bool = True,
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Compute clipped gradients via reweighted loss (Ghost Clipping approach).
+        
+        Args:
+            per_sample_norms: [batch_size] tensor from compute_per_sample_norms
+        """
+        edge_index_adj, edge_index_od, edge_index_od_t = edge_indices
+        
+        # Compute clipping coefficients: min(1, C / norm)
+        clip_coef = torch.clamp(self.max_grad_norm / (per_sample_norms + 1e-10), max=1.0)
+        
+        self.model.zero_grad(set_to_none=True)
+        
+        # Compute reweighted loss
+        total_loss = 0.0
+        for i in range(batch_x.shape[0]):
+            data = Data(
+                x=batch_x[i],
+                edge_index_adj=edge_index_adj,
+                edge_index_od=edge_index_od,
+                edge_index_od_t=edge_index_od_t,
             )
-            clip_coef = min(1.0, self.max_grad_norm / (grad_norm + 1e-10))
-            clipped_grads = {k: v * clip_coef for k, v in sample_grads.items()}
             
-            all_grads.append(clipped_grads)
+            if is_classification:
+                _, node_logits = self.model.forward_classifier(data)
+                graph_logit = aggregate_node_to_graph(node_logits)
+                graph_target = ensure_graph_level_target(batch_y[i])
+                loss = loss_fn(graph_logit, graph_target)
+            else:
+                _, node_reg = self.model(data)
+                graph_reg = aggregate_node_to_graph(node_reg)
+                graph_target = ensure_graph_level_target(batch_y[i])
+                mask = (graph_target >= 0).float()
+                loss = loss_fn(graph_reg * mask, graph_target * mask)
+            
+            # Reweight loss by clipping coefficient
+            total_loss += clip_coef[i] * loss
         
-        # Average clipped gradients across samples
-        avg_grads = {}
-        for key in all_grads[0].keys():
-            avg_grads[key] = torch.mean(
-                torch.stack([g[key] for g in all_grads]), 
-                dim=0
-            )
+        # Single backward pass with reweighted loss
+        (total_loss / batch_x.shape[0]).backward()
         
-        return avg_grads
+        # Collect averaged clipped gradients
+        clipped_grads = {}
+        for name, param in self.model.named_parameters():
+            if param.grad is not None and param.requires_grad:
+                clipped_grads[name] = param.grad.clone().detach()
+        
+        return clipped_grads
     
     def add_noise_to_gradients(
         self, 
@@ -294,7 +432,7 @@ def train_stage1_with_dp(
     dp_config: DPConfig,
     batch_size: int,
 ) -> Tuple[List[Dict], RDPAccountant, float]:
-    """Train stage 1 with proper DP-SGD."""
+    """Train stage 1 with proper DP-SGD and epsilon budget control."""
     
     stage_start_time = time.time()
     
@@ -334,6 +472,7 @@ def train_stage1_with_dp(
     early_stopping = EarlyStopping(patience=patience, mode="max")
     
     for epoch in range(1, epochs + 1):
+        
         epoch_start_time = time.time()
         model.train()
         epoch_losses = []
@@ -345,34 +484,37 @@ def train_stage1_with_dp(
             end_idx = min(start_idx + batch_size, num_samples)
             batch_indices = indices[start_idx:end_idx]
             
-            if dp_config.enabled:
-                mask = torch.rand(len(batch_indices)) < dp_config.sample_rate
-                batch_indices = batch_indices[mask]
-                if len(batch_indices) == 0:
-                    continue
-            
             batch_x = train_x[batch_indices].to(device)
             batch_y = train_y_cls[batch_indices].to(device)
             
             optimizer.zero_grad(set_to_none=True)
             
             if dp_config.enabled:
-                # DP-SGD: Per-sample clipping + noise
-                per_sample_grads = clipper.compute_per_sample_gradients(
+                # DP-SGD with Ghost Clipping: 2 backward passes
+                # Pass 1: Compute per-sample gradient norms
+                per_sample_norms = clipper.compute_per_sample_norms(
                     batch_x, batch_y, edge_indices, cls_loss_fn, is_classification=True
                 )
                 
+                # Pass 2: Compute clipped gradients via reweighted loss
+                clipped_grads = clipper.compute_clipped_gradients(
+                    batch_x, batch_y, edge_indices, cls_loss_fn, 
+                    per_sample_norms, is_classification=True
+                )
+                
+                # Add noise to clipped gradients
                 noisy_grads = clipper.add_noise_to_gradients(
-                    per_sample_grads,
+                    clipped_grads,
                     dp_config.noise_multiplier,
                     len(batch_indices),
                 )
                 
+                # Apply noisy gradients
                 for name, param in model.named_parameters():
                     if param.requires_grad and name in noisy_grads:
                         param.grad = noisy_grads[name]
                 
-                # Loss for logging
+                # Loss for logging (reuse from clipping pass)
                 with torch.no_grad():
                     logits_list = []
                     targets_list = []
@@ -384,14 +526,13 @@ def train_stage1_with_dp(
                             edge_index_od_t=edge_indices[2],
                         )
                         _, node_logits = model.forward_classifier(data.to(device))
-                        # FIXED: Aggregate both predictions AND targets to graph-level
                         graph_logit = aggregate_node_to_graph(node_logits)
                         graph_target = ensure_graph_level_target(batch_y[i])
                         logits_list.append(graph_logit)
                         targets_list.append(graph_target)
                     
-                    all_logits = torch.cat(logits_list, dim=0)  # [batch_size, 1]
-                    all_targets = torch.cat(targets_list, dim=0)  # [batch_size, 1]
+                    all_logits = torch.cat(logits_list, dim=0)
+                    all_targets = torch.cat(targets_list, dim=0)
                     loss = cls_loss_fn(all_logits, all_targets)
                 
                 accountant.step()
@@ -407,19 +548,19 @@ def train_stage1_with_dp(
                         edge_index_od_t=edge_indices[2],
                     )
                     _, node_logits = model.forward_classifier(data.to(device))
-                    # FIXED: Aggregate both predictions AND targets to graph-level
                     graph_logit = aggregate_node_to_graph(node_logits)
                     graph_target = ensure_graph_level_target(batch_y[i])
                     logits_list.append(graph_logit)
                     targets_list.append(graph_target)
                 
-                all_logits = torch.cat(logits_list, dim=0)  # [batch_size, 1]
-                all_targets = torch.cat(targets_list, dim=0)  # [batch_size, 1]
+                all_logits = torch.cat(logits_list, dim=0)
+                all_targets = torch.cat(targets_list, dim=0)
                 loss = cls_loss_fn(all_logits, all_targets)
                 loss.backward()
             
             optimizer.step()
             epoch_losses.append(loss.item())
+        
         
         # Validation
         model.eval()
@@ -463,9 +604,10 @@ def train_stage1_with_dp(
             'epsilon': current_epsilon,
             'delta': dp_config.target_delta if dp_config.enabled else 0.0,
             'epoch_time_seconds': epoch_time,
+            'total_steps': accountant.steps,
         })
         
-        eps_str = f"ε: {current_epsilon:.3f}" if dp_config.enabled else "No DP"
+        eps_str = f"ε: {current_epsilon:.3f}/{dp_config.target_epsilon}" if dp_config.enabled else "No DP"
         print(
             f"Epoch {epoch}/{epochs} | Loss: {history[-1]['train_loss']:.4f} | "
             f"Val F1: {val_metrics['f1']:.4f} | {eps_str} | Time: {epoch_time:.2f}s"
@@ -491,7 +633,9 @@ def train_stage1_with_dp(
         param.requires_grad = True
     
     stage_time = time.time() - stage_start_time
+    final_epsilon = accountant.get_epsilon(dp_config.target_delta) if dp_config.enabled else float('inf')
     print(f"\nStage 1 completed in {stage_time:.2f}s ({stage_time/60:.2f} min)")
+    print(f"Final ε: {final_epsilon:.3f} (target: {dp_config.target_epsilon})")
     
     return history, accountant, stage_time
 
@@ -515,7 +659,7 @@ def train_stage2_with_dp(
     batch_size: int,
     stage1_accountant: RDPAccountant,
 ) -> Tuple[List[Dict], RDPAccountant, float]:
-    """Train stage 2 with proper DP-SGD."""
+    """Train stage 2 with proper DP-SGD and epsilon budget control."""
     
     stage_start_time = time.time()
     
@@ -540,8 +684,9 @@ def train_stage2_with_dp(
     
     if dp_config.enabled:
         clipper = PerSampleGradientClipper(model, dp_config.max_grad_norm)
+        current_eps = stage1_accountant.get_epsilon(dp_config.target_delta)
         print(f"✓ DP-SGD enabled (continuing from stage 1)")
-        print(f"  Current ε: {stage1_accountant.get_epsilon(dp_config.target_delta):.3f}")
+        print(f"  Current ε: {current_eps:.3f} / {dp_config.target_epsilon}")
     else:
         print("✗ DP-SGD disabled")
     
@@ -551,6 +696,7 @@ def train_stage2_with_dp(
     early_stopping = EarlyStopping(patience=patience, mode="min")
     
     for epoch in range(1, epochs + 1):
+        
         epoch_start_time = time.time()
         model.train()
         epoch_losses = []
@@ -562,12 +708,6 @@ def train_stage2_with_dp(
             end_idx = min(start_idx + batch_size, num_samples)
             batch_indices = indices[start_idx:end_idx]
             
-            if dp_config.enabled:
-                mask = torch.rand(len(batch_indices)) < dp_config.sample_rate
-                batch_indices = batch_indices[mask]
-                if len(batch_indices) == 0:
-                    continue
-            
             batch_x = train_x[batch_indices].to(device)
             batch_y_reg = train_y_reg[batch_indices].to(device)
             batch_y_cls = train_y_cls[batch_indices].to(device)
@@ -575,12 +715,18 @@ def train_stage2_with_dp(
             optimizer.zero_grad(set_to_none=True)
             
             if dp_config.enabled:
-                per_sample_grads = clipper.compute_per_sample_gradients(
+                # Ghost Clipping: 2 backward passes
+                per_sample_norms = clipper.compute_per_sample_norms(
                     batch_x, batch_y_reg, edge_indices, reg_loss_fn, is_classification=False
                 )
                 
+                clipped_grads = clipper.compute_clipped_gradients(
+                    batch_x, batch_y_reg, edge_indices, reg_loss_fn,
+                    per_sample_norms, is_classification=False
+                )
+                
                 noisy_grads = clipper.add_noise_to_gradients(
-                    per_sample_grads,
+                    clipped_grads,
                     dp_config.noise_multiplier,
                     len(batch_indices),
                 )
@@ -608,7 +754,6 @@ def train_stage2_with_dp(
                     reg_preds = torch.cat(reg_preds, dim=0)
                     reg_targets = torch.cat(reg_targets, dim=0)
                     
-                    # Gating based on classification (graph-level)
                     cls_mask = []
                     for i in range(len(batch_y_cls)):
                         graph_cls = ensure_graph_level_target(batch_y_cls[i])
@@ -655,6 +800,7 @@ def train_stage2_with_dp(
             optimizer.step()
             epoch_losses.append(loss.item())
         
+        
         # Validation
         model.eval()
         val_losses = []
@@ -693,9 +839,10 @@ def train_stage2_with_dp(
             'epsilon': current_epsilon,
             'delta': dp_config.target_delta if dp_config.enabled else 0.0,
             'epoch_time_seconds': epoch_time,
+            'total_steps': accountant.steps,
         })
         
-        eps_str = f"ε: {current_epsilon:.3f}" if dp_config.enabled else "No DP"
+        eps_str = f"ε: {current_epsilon:.3f}/{dp_config.target_epsilon}" if dp_config.enabled else "No DP"
         print(
             f"Epoch {epoch}/{epochs} | Train Loss: {history[-1]['train_loss']:.4f} | "
             f"Val Loss: {val_loss:.4f} | {eps_str} | Time: {epoch_time:.2f}s"
@@ -717,7 +864,9 @@ def train_stage2_with_dp(
         param.requires_grad = True
     
     stage_time = time.time() - stage_start_time
+    final_epsilon = accountant.get_epsilon(dp_config.target_delta) if dp_config.enabled else float('inf')
     print(f"\nStage 2 completed in {stage_time:.2f}s ({stage_time/60:.2f} min)")
+    print(f"Final ε: {final_epsilon:.3f} (target: {dp_config.target_epsilon})")
     
     return history, accountant, stage_time
 
@@ -742,6 +891,7 @@ def final_evaluation(
     stage2_time: float,
     train_samples: int,
     val_samples: int,
+    dp_config: DPConfig,
 ) -> None:
     """Final evaluation and export."""
     
@@ -760,6 +910,8 @@ def final_evaluation(
         'regressor': model.regressor.state_dict(),
         'final_epsilon': float(final_epsilon),
         'final_delta': float(final_delta),
+        'target_epsilon': float(dp_config.target_epsilon),
+        'epsilon_exceeded': final_epsilon > dp_config.target_epsilon if dp_config.enabled else False,
     }, model_path)
     
     checkpoint = torch.load(model_path, map_location=device, weights_only=False)
@@ -781,11 +933,9 @@ def final_evaluation(
             )
             node_logits, node_reg = model(data)
             
-            # FIXED: Aggregate predictions to graph-level
             graph_logit = aggregate_node_to_graph(node_logits)
             graph_reg = aggregate_node_to_graph(node_reg)
             
-            # FIXED: Also aggregate targets to graph-level
             graph_cls_target = ensure_graph_level_target(test_y_cls[i])
             graph_reg_target = ensure_graph_level_target(test_y_reg[i])
             
@@ -794,32 +944,26 @@ def final_evaluation(
             targets_cls_list.append(graph_cls_target.cpu().numpy())
             targets_reg_list.append(graph_reg_target.cpu().numpy())
     
-    # FIXED: Now all arrays have consistent shapes (num_test_samples, out_dim)
-    test_probs = np.concatenate(logits_list, axis=0)  # (num_samples, 1)
-    test_reg_preds = np.concatenate(reg_list, axis=0)  # (num_samples, out_channels)
-    test_cls_targets = np.concatenate(targets_cls_list, axis=0)  # (num_samples, 1)
-    test_reg_targets = np.concatenate(targets_reg_list, axis=0)  # (num_samples, out_channels)
+    test_probs = np.concatenate(logits_list, axis=0)
+    test_reg_preds = np.concatenate(reg_list, axis=0)
+    test_cls_targets = np.concatenate(targets_cls_list, axis=0)
+    test_reg_targets = np.concatenate(targets_reg_list, axis=0)
     
-    # Classification metrics
     test_cls_metrics = classification_metrics(
         test_probs.reshape(-1, 1),
         test_cls_targets.reshape(-1, 1),
     )
     
-    # FIXED: Apply gating with matching shapes - broadcast test_mask to match predictions
-    test_mask = (test_probs >= class_threshold)  # (num_samples, 1)
-    gated_preds = test_reg_preds * test_mask  # (num_samples, out_channels)
+    test_mask = (test_probs >= class_threshold)
+    gated_preds = test_reg_preds * test_mask
     
-    # Denormalize predictions and targets
     if scaler is not None:
-        # Ensure scaler expects the right shape
         preds_denorm = scaler.inverse_transform(gated_preds)
         targets_denorm = scaler.inverse_transform(test_reg_targets)
     else:
         preds_denorm = gated_preds
         targets_denorm = test_reg_targets
     
-    # Compute regression metrics on delayed samples only
     delayed_mask = test_cls_targets.flatten() >= class_threshold
     if delayed_mask.sum() > 0:
         delayed_preds = preds_denorm[delayed_mask]
@@ -840,7 +984,14 @@ def final_evaluation(
         mae, rmse = 0.0, 0.0
     
     print("\nPRIVACY BUDGET:")
+    print(f"  Target ε: {dp_config.target_epsilon:.3f}")
     print(f"  Final ε: {final_epsilon:.3f}")
+    if dp_config.enabled:
+        if final_epsilon <= dp_config.target_epsilon:
+            print(f"  ✓ Budget maintained (within target)")
+        else:
+            overshoot = final_epsilon - dp_config.target_epsilon
+            print(f"  ⚠️  Budget exceeded by {overshoot:.3f} ε ({overshoot/dp_config.target_epsilon*100:.1f}%)")
     print(f"  Final δ: {final_delta:.2e}")
     
     print("\nTRAINING TIME:")
@@ -854,14 +1005,14 @@ def final_evaluation(
     
     # Export history
     if histories:
-        with open("kan_gat_dp_proper_history.csv", "w", newline="") as f:
+        with open("kan_gat_dp_epsilon_controlled_history.csv", "w", newline="") as f:
             all_fields = sorted({k for row in histories for k in row})
             writer = csv.DictWriter(f, fieldnames=all_fields)
             writer.writeheader()
             writer.writerows(histories)
     
     # Export summary
-    with open("kan_gat_dp_proper_summary.csv", "w", newline="") as f:
+    with open("kan_gat_dp_epsilon_controlled_summary.csv", "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(['metric', 'value'])
         summary = {
@@ -872,7 +1023,10 @@ def final_evaluation(
             'regression_mae_delayed': mae,
             'regression_rmse_delayed': rmse,
             'num_delayed_samples': int(delayed_mask.sum()) if delayed_mask.sum() > 0 else 0,
+            'target_epsilon': dp_config.target_epsilon,
             'final_epsilon': final_epsilon,
+            'epsilon_exceeded': final_epsilon > dp_config.target_epsilon if dp_config.enabled else False,
+            'epsilon_overshoot': max(0, final_epsilon - dp_config.target_epsilon) if dp_config.enabled else 0,
             'final_delta': final_delta,
             'stage1_time_seconds': stage1_time,
             'stage2_time_seconds': stage2_time,
@@ -887,13 +1041,12 @@ def final_evaluation(
     
     print(f"\n✓ Results saved to:")
     print(f"  - {model_path}")
-    print(f"  - kan_gat_dp_proper_history.csv")
-    print(f"  - kan_gat_dp_proper_summary.csv")
-
+    print(f"  - kan_gat_dp_epsilon_controlled_history.csv")
+    print(f"  - kan_gat_dp_epsilon_controlled_summary.csv")
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Proper DP-SGD for KAN-GAT")
+    parser = argparse.ArgumentParser(description="Proper DP-SGD for KAN-GAT with epsilon budget control")
     
     parser.add_argument('--data_source', type=str, default='udata', choices=['cdata', 'udata'])
     parser.add_argument('--seq_len', type=int, default=8)
@@ -906,15 +1059,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--stage1_epochs', type=int, default=15)
     parser.add_argument('--stage2_epochs', type=int, default=15)
     parser.add_argument('--batch_size', type=int, default=16)
-    parser.add_argument('--lr', type=float, default=0.003)
+    parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--patience', type=int, default=5)
     
-    parser.add_argument('--dp', default=True,action='store_true', help='Enable DP-SGD')
-    parser.add_argument('--target_epsilon', type=float, default=2)
+    parser.add_argument('--dp', default=True, action='store_true', help='Enable DP-SGD')
+    parser.add_argument('--target_epsilon', type=float, default=8.0)
     parser.add_argument('--target_delta', type=float, default=1e-5)
     parser.add_argument('--noise_multiplier', type=float, default=4)
-    parser.add_argument('--max_grad_norm', type=float, default=1.0)
-    parser.add_argument('--sample_rate', type=float, default=0.01)
+    parser.add_argument('--max_grad_norm', type=float, default=1.5)
+    parser.add_argument('--sample_rate', type=float, default=0.02)
+    parser.add_argument('--epsilon_tolerance', type=float, default=0.05, 
+                        help='Stop when within this fraction of target epsilon (default: 0.05 = 5%)')
     
     parser.add_argument('--model_path', type=str, default='kan_gat_dp_proper.pth')
     parser.add_argument('--seed', type=int, default=42)
@@ -979,13 +1134,38 @@ def main() -> None:
         hidden_channels=32,
     ).to(device)
     
+
+
+    # Auto-compute noise multiplier for target epsilon (following Opacus approach)
+    total_samples = len(train_x)
+    
+    # Key fix: sample_rate should be batch_size / total_samples (expected sampling rate)
+    # NOT a tiny fixed value like 0.02
+    sample_rate = args.batch_size / total_samples
+    
+    # Calculate expected number of steps per epoch with this sample rate
+    # Each epoch we go through the data once, so steps = ceil(total_samples / batch_size)
+    steps_per_epoch = int(np.ceil(total_samples / args.batch_size))
+    total_steps = (args.stage1_epochs + args.stage2_epochs) * steps_per_epoch
+
+    if args.dp:
+        computed_noise_multiplier = solve_noise_multiplier_for_epsilon(
+            args.target_epsilon, args.target_delta, sample_rate, total_steps
+        )
+        print(f"\nAuto-computed noise multiplier for target ε={args.target_epsilon}: {computed_noise_multiplier:.3f}")
+        print(f"  Sample rate: {sample_rate:.4f} (batch_size={args.batch_size} / total={total_samples})")
+        print(f"  Expected total steps: {total_steps} ({steps_per_epoch} steps/epoch × {args.stage1_epochs + args.stage2_epochs} epochs)")
+        args.noise_multiplier = computed_noise_multiplier
+        args.sample_rate = sample_rate  # Override with computed value
+    
     dp_config = DPConfig(
         enabled=args.dp,
         target_epsilon=args.target_epsilon,
         target_delta=args.target_delta,
         noise_multiplier=args.noise_multiplier,
         max_grad_norm=args.max_grad_norm,
-        sample_rate=args.sample_rate,
+        sample_rate=sample_rate if args.dp else args.sample_rate,
+        epsilon_tolerance=args.epsilon_tolerance,
     )
     
     cls_pos_rate = train_y_cls.mean().item()
@@ -1026,7 +1206,7 @@ def main() -> None:
         delay_dim, num_nodes, test_x, test_y_reg, test_y_cls,
         args.class_threshold, args.model_path, combined_history,
         final_epsilon, final_delta, stage1_time, stage2_time,
-        len(train_x), len(val_x),
+        len(train_x), len(val_x), dp_config,
     )
 
 

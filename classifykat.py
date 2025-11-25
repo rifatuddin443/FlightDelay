@@ -304,7 +304,8 @@ def build_sequences(
 
         raw_target = raw[:, t + seq_len:t + seq_len + horizon, :]
         raw_target = np.nan_to_num(raw_target[:, horizon_ids, :])
-        cls_flag = (np.max(np.abs(raw_target), axis=(1, 2)) >= delay_threshold).astype(np.float32)
+        # Only count positive delays (negative = early arrival, should not be classified as delay)
+        cls_flag = (np.max(raw_target, axis=(1, 2)) >= delay_threshold).astype(np.float32)
         cls_flag = cls_flag.reshape(num_nodes, 1)
 
         x_list.append(x_seq)

@@ -910,11 +910,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--patience', type=int, default=5)
     
     parser.add_argument('--dp', default=True,action='store_true', help='Enable DP-SGD')
-    parser.add_argument('--target_epsilon', type=float, default=2)
+    parser.add_argument('--target_epsilon', type=float, default=10)
     parser.add_argument('--target_delta', type=float, default=1e-5)
-    parser.add_argument('--noise_multiplier', type=float, default=4)
+    parser.add_argument('--noise_multiplier', type=float, default=30)
     parser.add_argument('--max_grad_norm', type=float, default=1.0)
-    parser.add_argument('--sample_rate', type=float, default=0.01)
+    parser.add_argument('--sample_rate', type=float, default=0.1)
     
     parser.add_argument('--model_path', type=str, default='kan_gat_dp_proper.pth')
     parser.add_argument('--seed', type=int, default=42)
@@ -966,6 +966,11 @@ def main() -> None:
         test_inputs, test_delay_scaled, test_raw,
         args.seq_len, max_horizon, args.delay_threshold, horizons
     )
+    
+    # Add this before build_sequences in main():
+    print(f"\nRAW DATA STATISTICS:")
+    print(f"Train delay mean: {train_raw.mean():.2f} min")
+    print(f"Train delayed %: {(train_raw >= args.delay_threshold).astype(float).mean():.2%}")
     
     edge_indices = (
         edge_index_adj.to(device),

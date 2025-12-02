@@ -1046,21 +1046,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--horizons', type=int, nargs='+', default=[3, 6, 12])
     parser.add_argument('--delay_threshold', type=float, default=5.0)
     parser.add_argument('--class_threshold', type=float, default=0.5)
-    parser.add_argument('--use_node_level', action='store_true', 
-                        help='Use node-level labels (26%% delay) instead of graph-level (100%% delay)')
+    parser.add_argument('--use_node_level', action='store_true', default=True, help='Use node-level labels ')
     parser.add_argument('--weather_file', type=str, default='weather_cn.npy')
     parser.add_argument('--period_hours', type=int, default=24)
     
-    parser.add_argument('--stage1_epochs', type=int, default=8)
-    parser.add_argument('--stage2_epochs', type=int, default=15)
+    parser.add_argument('--stage1_epochs', type=int, default=5)
+    parser.add_argument('--stage2_epochs', type=int, default=10)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--patience', type=int, default=5)
     
     parser.add_argument('--dp', default=True, action='store_true', help='Enable DP-SGD')
-    parser.add_argument('--target_epsilon', type=float, default=14)
+    parser.add_argument('--target_epsilon', type=float, default=15.0)
     parser.add_argument('--target_delta', type=float, default=1e-5)
-    parser.add_argument('--noise_multiplier', type=float, default=4)
+    parser.add_argument('--noise_multiplier', type=float, default=2)
     parser.add_argument('--max_grad_norm', type=float, default=1.5)
     parser.add_argument('--sample_rate', type=float, default=0.02)
     parser.add_argument('--epsilon_tolerance', type=float, default=0.05, 
@@ -1108,9 +1107,9 @@ def main() -> None:
     build_fn = build_sequences_node_level if args.use_node_level else build_sequences
     
     if args.use_node_level:
-        print("[INFO] Using NODE-LEVEL labels (preserves ~26% delay distribution)")
+        print("[INFO] Using NODE-LEVEL labels ")
     else:
-        print("[INFO] Using GRAPH-LEVEL labels (MAX aggregation, ~100% delayed)")
+        print("[INFO] Using GRAPH-LEVEL labels ")
     
     train_x, train_y_reg, train_y_cls = build_fn(
         train_inputs, train_delay_scaled, train_raw,

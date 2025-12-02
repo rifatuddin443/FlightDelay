@@ -204,7 +204,7 @@ def parse_args() -> argparse.Namespace:
         default="kan_gat_dp_proper.pth",
         help="Path to the DP-trained checkpoint",
     )
-    parser.add_argument("--data_source", type=str, default="cdata", choices=["cdata", "udata"])
+    parser.add_argument("--data_source", type=str, default="udata", choices=["cdata", "udata"])
     parser.add_argument("--seq_len", type=int, default=8)
     parser.add_argument("--horizons", type=int, nargs="+", default=[3, 6, 12])
     parser.add_argument("--delay_threshold", type=float, default=5.0)

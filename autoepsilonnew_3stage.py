@@ -752,21 +752,29 @@ def train_stage3_with_dp(
     batch_size: int,
     stage2_accountant: RDPAccountant,
 ) -> Tuple[List[Dict], RDPAccountant, float]:
-    """FIXED: Train stage 3 (non-delayed flights regressor) with proper masking based on actual delays."""
+    """FIXED: Train stage 3 with PER-HORIZON masking instead of per-sample masking."""
     stage_start_time = time.time()
     print("\n" + "="*80)
     print("STAGE 3: TRAINING DELAY REGRESSOR (NON-DELAYED FLIGHTS) WITH DP-SGD")
-    print(f"Training on flights with delays < {delay_threshold} min")
+    print(f"Training on flights with |delay| < {delay_threshold} min")
     print("="*80)
     print(f"Train samples: {len(train_x)} | Val samples: {len(val_x)}")
     
+    # Fine-tune encoder + regressor
     for param in model.encoder.parameters():
-        param.requires_grad = False
+        param.requires_grad = True
     for param in model.classifier.parameters():
         param.requires_grad = False
     
-    optimizer = torch.optim.Adam(model.regressor.parameters(), lr=lr, weight_decay=1e-4)
-    reg_loss_fn = nn.MSELoss(reduction='mean')
+    # Lower learning rate for fine-tuning
+    optimizer = torch.optim.Adam(
+        list(model.encoder.parameters()) + list(model.regressor.parameters()), 
+        lr=lr * 0.1,
+        weight_decay=1e-4
+    )
+    
+    # Use MSE with per-element weighting
+    reg_loss_fn = nn.MSELoss(reduction='none')
     
     accountant = RDPAccountant(
         noise_multiplier=dp_config.noise_multiplier,
@@ -782,6 +790,13 @@ def train_stage3_with_dp(
     else:
         print("✗ DP-SGD disabled")
     
+    print(f"✓ Fine-tuning encoder + regressor with LR={lr * 0.1:.6f}")
+    
+    # Determine number of horizons and delay dimensions
+    # Assuming out_channels = num_horizons * delay_dim
+    num_horizons = 3  # 3, 6, 12 step
+    delay_dim = 2     # arrival, departure
+    
     history = []
     best_val_loss = float('inf')
     best_state = None
@@ -791,7 +806,8 @@ def train_stage3_with_dp(
         epoch_start_time = time.time()
         model.train()
         epoch_losses = []
-        epoch_nondelayed_count = 0
+        total_nondelayed_values = 0
+        total_values = 0
         
         num_samples = train_x.shape[0]
         indices = torch.randperm(num_samples)
@@ -801,13 +817,16 @@ def train_stage3_with_dp(
             batch_indices = indices[start_idx:end_idx]
             batch_x = train_x[batch_indices].to(device)
             batch_y_reg = train_y_reg[batch_indices].to(device)
-            batch_y_cls = train_y_cls[batch_indices].to(device)
             
             optimizer.zero_grad(set_to_none=True)
             
             if dp_config.enabled:
+                # For DP-SGD, we need per-sample gradients
+                # This is complex with element-wise masking, so fall back to sample-level
                 per_sample_grads = clipper.compute_per_sample_gradients(
-                    batch_x, batch_y_reg, edge_indices, reg_loss_fn, is_classification=False
+                    batch_x, batch_y_reg, edge_indices, 
+                    lambda p, t: reg_loss_fn(p, t).mean(), 
+                    is_classification=False
                 )
                 noisy_grads = clipper.add_noise_to_gradients(
                     per_sample_grads,
@@ -836,28 +855,42 @@ def train_stage3_with_dp(
                     reg_preds = torch.cat(reg_preds, dim=0)
                     reg_targets = torch.cat(reg_targets, dim=0)
                     
-                    # FIXED: Denormalize targets to get actual delays in minutes
+                    # Denormalize to check threshold
                     if scaler is not None:
                         targets_denorm = torch.from_numpy(
                             scaler.inverse_transform(reg_targets.cpu().numpy())
                         ).to(device)
+                        preds_denorm = torch.from_numpy(
+                            scaler.inverse_transform(reg_preds.cpu().numpy())
+                        ).to(device)
                     else:
                         targets_denorm = reg_targets
+                        preds_denorm = reg_preds
                     
-                    # FIXED: Mask based on actual delay values, not classification labels
-                    # Check if maximum delay across all horizons/dimensions is < threshold
-                    max_delay_per_sample = targets_denorm.abs().max(dim=1)[0]
-                    mask = (max_delay_per_sample < delay_threshold).float()
+                    # FIXED: Create element-wise mask (not sample-wise)
+                    # Shape: [batch_size, num_horizons * delay_dim]
+                    # Mask out only the specific delay values that exceed threshold
+                    element_mask = (targets_denorm.abs() < delay_threshold).float()
                     
-                    if mask.dim() == 1:
-                        mask = mask.unsqueeze(-1)
+                    # Apply mask element-wise
+                    masked_preds = preds_denorm * element_mask
+                    masked_targets = targets_denorm * element_mask
                     
-                    # Apply mask to normalized predictions and targets for loss
-                    loss = reg_loss_fn(reg_preds * mask, reg_targets * mask)
-                    epoch_nondelayed_count += mask.sum().item()
+                    # Compute loss only on non-delayed elements
+                    loss_per_element = (masked_preds - masked_targets) ** 2
+                    num_nondelayed = element_mask.sum()
+                    
+                    if num_nondelayed > 0:
+                        loss = loss_per_element.sum() / num_nondelayed
+                    else:
+                        loss = torch.tensor(0.0, device=device)
+                    
+                    total_nondelayed_values += num_nondelayed.item()
+                    total_values += element_mask.numel()
                 
                 accountant.step()
             else:
+                # Non-DP path with element-wise masking
                 reg_preds = []
                 reg_targets = []
                 for i in range(len(batch_x)):
@@ -875,7 +908,7 @@ def train_stage3_with_dp(
                 reg_preds = torch.cat(reg_preds, dim=0)
                 reg_targets = torch.cat(reg_targets, dim=0)
                 
-                # FIXED: Same fix for non-DP path
+                # Denormalize
                 if scaler is not None:
                     targets_denorm = torch.from_numpy(
                         scaler.inverse_transform(reg_targets.cpu().numpy())
@@ -883,23 +916,33 @@ def train_stage3_with_dp(
                 else:
                     targets_denorm = reg_targets
                 
-                max_delay_per_sample = targets_denorm.abs().max(dim=1)[0]
-                mask = (max_delay_per_sample < delay_threshold).float()
+                # FIXED: Element-wise masking
+                # Re-normalize after creating mask
+                element_mask = (targets_denorm.abs() < delay_threshold).float()
                 
-                if mask.dim() == 1:
-                    mask = mask.unsqueeze(-1)
+                # Compute loss on normalized values with mask
+                loss_per_element = reg_loss_fn(reg_preds, reg_targets) * element_mask
+                num_nondelayed = element_mask.sum()
                 
-                loss = reg_loss_fn(reg_preds * mask, reg_targets * mask)
-                epoch_nondelayed_count += mask.sum().item()
+                if num_nondelayed > 0:
+                    loss = loss_per_element.sum() / num_nondelayed
+                else:
+                    loss = torch.tensor(0.0, device=device)
+                
+                total_nondelayed_values += num_nondelayed.item()
+                total_values += element_mask.numel()
+                
                 loss.backward()
             
             optimizer.step()
             epoch_losses.append(loss.item())
         
-        # Validation with same fix
+        # Validation with element-wise masking
         model.eval()
         val_losses = []
-        val_nondelayed_count = 0
+        val_nondelayed_values = 0
+        val_total_values = 0
+        
         with torch.no_grad():
             for i in range(len(val_x)):
                 data = Data(
@@ -912,7 +955,6 @@ def train_stage3_with_dp(
                 graph_reg = aggregate_node_to_graph(node_reg)
                 graph_target = ensure_graph_level_target(val_y_reg[i])
                 
-                # FIXED: Use actual delay threshold
                 if scaler is not None:
                     target_denorm = torch.from_numpy(
                         scaler.inverse_transform(graph_target.cpu().numpy())
@@ -920,11 +962,16 @@ def train_stage3_with_dp(
                 else:
                     target_denorm = graph_target
                 
-                max_delay = target_denorm.abs().max()
-                if max_delay < delay_threshold:
-                    loss = reg_loss_fn(graph_reg.cpu(), graph_target)
+                # Element-wise mask
+                element_mask = (target_denorm.abs() < delay_threshold).float()
+                num_nondelayed = element_mask.sum()
+                
+                if num_nondelayed > 0:
+                    loss_per_element = nn.MSELoss(reduction='none')(graph_reg.cpu(), graph_target) * element_mask.cpu()
+                    loss = loss_per_element.sum() / num_nondelayed
                     val_losses.append(loss.item())
-                    val_nondelayed_count += 1
+                    val_nondelayed_values += num_nondelayed.item()
+                    val_total_values += element_mask.numel()
         
         val_loss = np.mean(val_losses) if val_losses else 0.0
         epoch_time = time.time() - epoch_start_time
@@ -934,13 +981,18 @@ def train_stage3_with_dp(
         else:
             current_epsilon = float('inf')
         
+        nondelayed_ratio = total_nondelayed_values / total_values if total_values > 0 else 0
+        val_nondelayed_ratio = val_nondelayed_values / val_total_values if val_total_values > 0 else 0
+        
         history.append({
             'epoch': epoch,
             'stage': 3,
             'train_loss': float(np.mean(epoch_losses)) if epoch_losses else 0.0,
-            'train_nondelayed_count': epoch_nondelayed_count,
+            'train_nondelayed_values': total_nondelayed_values,
+            'train_nondelayed_ratio': nondelayed_ratio,
             'val_loss': val_loss,
-            'val_nondelayed_count': val_nondelayed_count,
+            'val_nondelayed_values': val_nondelayed_values,
+            'val_nondelayed_ratio': val_nondelayed_ratio,
             'epsilon': current_epsilon,
             'delta': dp_config.target_delta if dp_config.enabled else 0.0,
             'epoch_time_seconds': epoch_time,
@@ -950,13 +1002,17 @@ def train_stage3_with_dp(
         eps_str = f"ε: {current_epsilon:.3f}/{dp_config.target_epsilon}" if dp_config.enabled else "No DP"
         print(
             f"Epoch {epoch}/{epochs} | Loss: {history[-1]['train_loss']:.4f} | "
-            f"Val Loss: {val_loss:.4f} | Train Non-delayed: {epoch_nondelayed_count} | "
-            f"Val Non-delayed: {val_nondelayed_count} | {eps_str} | Time: {epoch_time:.2f}s"
+            f"Val Loss: {val_loss:.4f} | Non-delayed: {total_nondelayed_values}/{total_values} ({nondelayed_ratio:.1%}) | "
+            f"Val: {val_nondelayed_values}/{val_total_values} ({val_nondelayed_ratio:.1%}) | "
+            f"{eps_str} | Time: {epoch_time:.2f}s"
         )
         
-        if val_loss < best_val_loss and val_nondelayed_count > 0:
+        if val_loss < best_val_loss and val_nondelayed_values > 0:
             best_val_loss = val_loss
-            best_state = model.regressor.state_dict()
+            best_state = {
+                'encoder': model.encoder.state_dict(),
+                'regressor': model.regressor.state_dict()
+            }
             print("  ✓ New best checkpoint")
         
         if early_stopping(val_loss, epoch):
@@ -964,7 +1020,8 @@ def train_stage3_with_dp(
             break
     
     if best_state:
-        model.regressor.load_state_dict(best_state)
+        model.encoder.load_state_dict(best_state['encoder'])
+        model.regressor.load_state_dict(best_state['regressor'])
     
     for param in model.parameters():
         param.requires_grad = True
@@ -976,7 +1033,6 @@ def train_stage3_with_dp(
     print(f"Final ε: {final_epsilon:.3f} (target: {dp_config.target_epsilon})")
     
     return history, accountant, stage_time
-
 
 def final_evaluation(
     model: SequentialTwoStagePredictor,

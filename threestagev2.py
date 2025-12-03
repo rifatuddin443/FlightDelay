@@ -752,197 +752,143 @@ def train_stage3_with_dp(
     batch_size: int,
     stage2_accountant: RDPAccountant,
 ) -> Tuple[List[Dict], RDPAccountant, float]:
-    """FIXED: Train stage 3 with PER-HORIZON masking instead of per-sample masking."""
+    """IMPROVED: Better handling of non-delayed flights (Stage 3 v2)."""
     stage_start_time = time.time()
-    print("\n" + "="*80)
-    print("STAGE 3: TRAINING DELAY REGRESSOR (NON-DELAYED FLIGHTS) WITH DP-SGD")
+    print("\n" + "=" * 80)
+    print("STAGE 3: TRAINING DELAY REGRESSOR (NON-DELAYED FLIGHTS) - IMPROVED")
     print(f"Training on flights with |delay| < {delay_threshold} min")
-    print("="*80)
+    print("=" * 80)
     print(f"Train samples: {len(train_x)} | Val samples: {len(val_x)}")
-    
-    # Fine-tune encoder + regressor
+
+    # Freeze encoder and classifier initially (regressor-only fine-tuning)
     for param in model.encoder.parameters():
-        param.requires_grad = True
+        param.requires_grad = False
     for param in model.classifier.parameters():
         param.requires_grad = False
-    
-    # Lower learning rate for fine-tuning
+
+    # Much lower LR, regressor only at first
     optimizer = torch.optim.Adam(
-        list(model.encoder.parameters()) + list(model.regressor.parameters()), 
-        lr=lr * 0.1,
-        weight_decay=1e-4
+        model.regressor.parameters(),
+        lr=lr * 0.01,
+        weight_decay=1e-5,
     )
-    
-    # Use MSE with per-element weighting
-    reg_loss_fn = nn.MSELoss(reduction='none')
-    
+
+    # Use Huber loss (more robust than MSE)
+    reg_loss_fn = nn.HuberLoss(reduction="none", delta=1.0)
+
     accountant = RDPAccountant(
         noise_multiplier=dp_config.noise_multiplier,
         sample_rate=dp_config.sample_rate if dp_config.enabled else 1.0,
         steps=stage2_accountant.steps,
     )
-    
-    if dp_config.enabled:
-        clipper = PerSampleGradientClipper(model, dp_config.max_grad_norm)
-        current_eps = stage2_accountant.get_epsilon(dp_config.target_delta)
-        print(f"✓ DP-SGD enabled (continuing from stage 2)")
-        print(f"  Current ε: {current_eps:.3f} / {dp_config.target_epsilon}")
-    else:
-        print("✗ DP-SGD disabled")
-    
-    print(f"✓ Fine-tuning encoder + regressor with LR={lr * 0.1:.6f}")
-    
-    # Determine number of horizons and delay dimensions
-    # Assuming out_channels = num_horizons * delay_dim
-    num_horizons = 3  # 3, 6, 12 step
-    delay_dim = 2     # arrival, departure
-    
-    history = []
-    best_val_loss = float('inf')
-    best_state = None
+
+    print(f"✓ Regressor-only training with LR={lr * 0.01:.6f}")
+    print("✓ Using Huber loss (robust to outliers)")
+
+    history: List[Dict] = []
+    best_val_loss = float("inf")
+    best_state: Optional[Dict[str, Dict[str, torch.Tensor]]] = None
     early_stopping = EarlyStopping(patience=patience, mode="min")
-    
+
+    # Epoch at which to unfreeze encoder (progressive fine-tuning)
+    unfreeze_epoch = max(2, epochs // 2)
+
     for epoch in range(1, epochs + 1):
+        # Progressive unfreezing of encoder
+        if epoch == unfreeze_epoch:
+            print("  → Unfreezing encoder with very low LR...")
+            for param in model.encoder.parameters():
+                param.requires_grad = True
+            optimizer = torch.optim.Adam(
+                [
+                    {"params": model.encoder.parameters(), "lr": lr * 0.001},
+                    {"params": model.regressor.parameters(), "lr": lr * 0.01},
+                ],
+                weight_decay=1e-5,
+            )
+
         epoch_start_time = time.time()
         model.train()
-        epoch_losses = []
-        total_nondelayed_values = 0
-        total_values = 0
-        
+        epoch_losses: List[float] = []
+        total_nondelayed = 0.0
+        total_values = 0.0
+
         num_samples = train_x.shape[0]
         indices = torch.randperm(num_samples)
-        
+
         for start_idx in range(0, num_samples, batch_size):
             end_idx = min(start_idx + batch_size, num_samples)
             batch_indices = indices[start_idx:end_idx]
             batch_x = train_x[batch_indices].to(device)
             batch_y_reg = train_y_reg[batch_indices].to(device)
-            
+
             optimizer.zero_grad(set_to_none=True)
-            
-            if dp_config.enabled:
-                # For DP-SGD, we need per-sample gradients
-                # This is complex with element-wise masking, so fall back to sample-level
-                per_sample_grads = clipper.compute_per_sample_gradients(
-                    batch_x, batch_y_reg, edge_indices, 
-                    lambda p, t: reg_loss_fn(p, t).mean(), 
-                    is_classification=False
+
+            # Forward pass: collect graph-level predictions/targets for batch
+            reg_preds: List[torch.Tensor] = []
+            reg_targets: List[torch.Tensor] = []
+            for i in range(len(batch_x)):
+                data = Data(
+                    x=batch_x[i],
+                    edge_index_adj=edge_indices[0],
+                    edge_index_od=edge_indices[1],
+                    edge_index_od_t=edge_indices[2],
                 )
-                noisy_grads = clipper.add_noise_to_gradients(
-                    per_sample_grads,
-                    dp_config.noise_multiplier,
-                    len(batch_indices),
-                )
-                for name, param in model.named_parameters():
-                    if param.requires_grad and name in noisy_grads:
-                        param.grad = noisy_grads[name]
-                
+                _, node_reg = model(data.to(device))
+                graph_reg = aggregate_node_to_graph(node_reg)
+                graph_target = ensure_graph_level_target(batch_y_reg[i])
+                reg_preds.append(graph_reg)
+                reg_targets.append(graph_target)
+
+            reg_preds_t = torch.cat(reg_preds, dim=0)  # [B, out_channels]
+            reg_targets_t = torch.cat(reg_targets, dim=0)
+
+            # Denormalize targets (detached) ONLY for mask creation
+            if scaler is not None:
                 with torch.no_grad():
-                    reg_preds = []
-                    reg_targets = []
-                    for i in range(len(batch_x)):
-                        data = Data(
-                            x=batch_x[i],
-                            edge_index_adj=edge_indices[0],
-                            edge_index_od=edge_indices[1],
-                            edge_index_od_t=edge_indices[2],
-                        )
-                        _, node_reg = model(data.to(device))
-                        graph_reg = aggregate_node_to_graph(node_reg)
-                        graph_target = ensure_graph_level_target(batch_y_reg[i])
-                        reg_preds.append(graph_reg)
-                        reg_targets.append(graph_target)
-                    reg_preds = torch.cat(reg_preds, dim=0)
-                    reg_targets = torch.cat(reg_targets, dim=0)
-                    
-                    # Denormalize to check threshold
-                    if scaler is not None:
-                        targets_denorm = torch.from_numpy(
-                            scaler.inverse_transform(reg_targets.cpu().numpy())
-                        ).to(device)
-                        preds_denorm = torch.from_numpy(
-                            scaler.inverse_transform(reg_preds.cpu().numpy())
-                        ).to(device)
-                    else:
-                        targets_denorm = reg_targets
-                        preds_denorm = reg_preds
-                    
-                    # FIXED: Create element-wise mask (not sample-wise)
-                    # Shape: [batch_size, num_horizons * delay_dim]
-                    # Mask out only the specific delay values that exceed threshold
-                    element_mask = (targets_denorm.abs() < delay_threshold).float()
-                    
-                    # Apply mask element-wise
-                    masked_preds = preds_denorm * element_mask
-                    masked_targets = targets_denorm * element_mask
-                    
-                    # Compute loss only on non-delayed elements
-                    loss_per_element = (masked_preds - masked_targets) ** 2
-                    num_nondelayed = element_mask.sum()
-                    
-                    if num_nondelayed > 0:
-                        loss = loss_per_element.sum() / num_nondelayed
-                    else:
-                        loss = torch.tensor(0.0, device=device)
-                    
-                    total_nondelayed_values += num_nondelayed.item()
-                    total_values += element_mask.numel()
-                
-                accountant.step()
-            else:
-                # Non-DP path with element-wise masking
-                reg_preds = []
-                reg_targets = []
-                for i in range(len(batch_x)):
-                    data = Data(
-                        x=batch_x[i],
-                        edge_index_adj=edge_indices[0],
-                        edge_index_od=edge_indices[1],
-                        edge_index_od_t=edge_indices[2],
-                    )
-                    _, node_reg = model(data.to(device))
-                    graph_reg = aggregate_node_to_graph(node_reg)
-                    graph_target = ensure_graph_level_target(batch_y_reg[i])
-                    reg_preds.append(graph_reg)
-                    reg_targets.append(graph_target)
-                reg_preds = torch.cat(reg_preds, dim=0)
-                reg_targets = torch.cat(reg_targets, dim=0)
-                
-                # Denormalize
-                if scaler is not None:
                     targets_denorm = torch.from_numpy(
-                        scaler.inverse_transform(reg_targets.cpu().numpy())
+                        scaler.inverse_transform(reg_targets_t.detach().cpu().numpy())
                     ).to(device)
+            else:
+                targets_denorm = reg_targets_t.detach()
+
+            # Create element-wise mask for non-delayed values in denormalized space
+            element_mask = (targets_denorm.abs() < delay_threshold).float()
+            num_nondelayed = element_mask.sum()
+
+            if num_nondelayed > 0:
+                # Huber loss in NORMALIZED space (keeps gradient graph), masked by denorm threshold
+                loss_per_element = reg_loss_fn(reg_preds_t, reg_targets_t) * element_mask
+                loss_nondelayed = loss_per_element.sum() / num_nondelayed
+
+                # Auxiliary loss on delayed elements after encoder is unfrozen
+                delayed_mask = (targets_denorm.abs() >= delay_threshold).float()
+                num_delayed = delayed_mask.sum()
+
+                if num_delayed > 0 and epoch >= unfreeze_epoch:
+                    aux_se = ((reg_preds_t - reg_targets_t) ** 2) * delayed_mask
+                    loss_delayed = aux_se.sum() / num_delayed
+                    loss = 0.8 * loss_nondelayed + 0.2 * loss_delayed
                 else:
-                    targets_denorm = reg_targets
-                
-                # FIXED: Element-wise masking
-                # Re-normalize after creating mask
-                element_mask = (targets_denorm.abs() < delay_threshold).float()
-                
-                # Compute loss on normalized values with mask
-                loss_per_element = reg_loss_fn(reg_preds, reg_targets) * element_mask
-                num_nondelayed = element_mask.sum()
-                
-                if num_nondelayed > 0:
-                    loss = loss_per_element.sum() / num_nondelayed
-                else:
-                    loss = torch.tensor(0.0, device=device)
-                
-                total_nondelayed_values += num_nondelayed.item()
-                total_values += element_mask.numel()
-                
+                    loss = loss_nondelayed
+
                 loss.backward()
-            
+                total_nondelayed += num_nondelayed.item()
+                total_values += float(element_mask.numel())
+            else:
+                # No non-delayed elements in this batch; just skip update
+                loss = torch.tensor(0.0, device=device, requires_grad=True)
+                loss.backward()
+
             optimizer.step()
             epoch_losses.append(loss.item())
-        
-        # Validation with element-wise masking
+
+        # Validation in denormalized space with same mask
         model.eval()
-        val_losses = []
-        val_nondelayed_values = 0
-        val_total_values = 0
-        
+        val_losses: List[float] = []
+        val_nondelayed = 0.0
+        val_total = 0.0
+
         with torch.no_grad():
             for i in range(len(val_x)):
                 data = Data(
@@ -954,84 +900,97 @@ def train_stage3_with_dp(
                 _, node_reg = model(data)
                 graph_reg = aggregate_node_to_graph(node_reg)
                 graph_target = ensure_graph_level_target(val_y_reg[i])
-                
+
                 if scaler is not None:
                     target_denorm = torch.from_numpy(
                         scaler.inverse_transform(graph_target.cpu().numpy())
                     ).to(device)
+                    pred_denorm = torch.from_numpy(
+                        scaler.inverse_transform(graph_reg.cpu().numpy())
+                    ).to(device)
                 else:
                     target_denorm = graph_target
-                
-                # Element-wise mask
+                    pred_denorm = graph_reg
+
                 element_mask = (target_denorm.abs() < delay_threshold).float()
                 num_nondelayed = element_mask.sum()
-                
+
                 if num_nondelayed > 0:
-                    loss_per_element = nn.MSELoss(reduction='none')(graph_reg.cpu(), graph_target) * element_mask.cpu()
-                    loss = loss_per_element.sum() / num_nondelayed
-                    val_losses.append(loss.item())
-                    val_nondelayed_values += num_nondelayed.item()
-                    val_total_values += element_mask.numel()
-        
-        val_loss = np.mean(val_losses) if val_losses else 0.0
+                    se = ((pred_denorm - target_denorm) ** 2) * element_mask
+                    loss_val = se.sum() / num_nondelayed
+                    val_losses.append(loss_val.item())
+                    val_nondelayed += num_nondelayed.item()
+                    val_total += float(element_mask.numel())
+
+        val_loss = float(np.mean(val_losses)) if val_losses else 0.0
         epoch_time = time.time() - epoch_start_time
-        
-        if dp_config.enabled:
-            current_epsilon = accountant.get_epsilon(dp_config.target_delta)
-        else:
-            current_epsilon = float('inf')
-        
-        nondelayed_ratio = total_nondelayed_values / total_values if total_values > 0 else 0
-        val_nondelayed_ratio = val_nondelayed_values / val_total_values if val_total_values > 0 else 0
-        
-        history.append({
-            'epoch': epoch,
-            'stage': 3,
-            'train_loss': float(np.mean(epoch_losses)) if epoch_losses else 0.0,
-            'train_nondelayed_values': total_nondelayed_values,
-            'train_nondelayed_ratio': nondelayed_ratio,
-            'val_loss': val_loss,
-            'val_nondelayed_values': val_nondelayed_values,
-            'val_nondelayed_ratio': val_nondelayed_ratio,
-            'epsilon': current_epsilon,
-            'delta': dp_config.target_delta if dp_config.enabled else 0.0,
-            'epoch_time_seconds': epoch_time,
-            'total_steps': accountant.steps,
-        })
-        
-        eps_str = f"ε: {current_epsilon:.3f}/{dp_config.target_epsilon}" if dp_config.enabled else "No DP"
+
+        current_epsilon = (
+            accountant.get_epsilon(dp_config.target_delta)
+            if dp_config.enabled
+            else float("inf")
+        )
+
+        nondelayed_ratio = (
+            total_nondelayed / total_values if total_values > 0 else 0.0
+        )
+        val_nondelayed_ratio = (
+            val_nondelayed / val_total if val_total > 0 else 0.0
+        )
+
+        history.append(
+            {
+                "epoch": epoch,
+                "stage": 3,
+                "train_loss": float(np.mean(epoch_losses)) if epoch_losses else 0.0,
+                "train_nondelayed": total_nondelayed,
+                "train_nondelayed_ratio": nondelayed_ratio,
+                "val_loss": val_loss,
+                "val_nondelayed": val_nondelayed,
+                "val_nondelayed_ratio": val_nondelayed_ratio,
+                "epsilon": current_epsilon,
+                "epoch_time_seconds": epoch_time,
+            }
+        )
+
+        eps_str = (
+            f"ε: {current_epsilon:.3f}/{dp_config.target_epsilon}"
+            if dp_config.enabled
+            else "No DP"
+        )
         print(
             f"Epoch {epoch}/{epochs} | Loss: {history[-1]['train_loss']:.4f} | "
-            f"Val Loss: {val_loss:.4f} | Non-delayed: {total_nondelayed_values}/{total_values} ({nondelayed_ratio:.1%}) | "
-            f"Val: {val_nondelayed_values}/{val_total_values} ({val_nondelayed_ratio:.1%}) | "
-            f"{eps_str} | Time: {epoch_time:.2f}s"
+            f"Val: {val_loss:.4f} | Non-delayed: {total_nondelayed:.0f} "
+            f"({nondelayed_ratio*100:.1f}%) | Val ND: {val_nondelayed:.0f} "
+            f"({val_nondelayed_ratio*100:.1f}%) | {eps_str} | Time: {epoch_time:.2f}s"
         )
-        
-        if val_loss < best_val_loss and val_nondelayed_values > 0:
+
+        if val_loss < best_val_loss and val_nondelayed > 0:
             best_val_loss = val_loss
             best_state = {
-                'encoder': model.encoder.state_dict(),
-                'regressor': model.regressor.state_dict()
+                "encoder": model.encoder.state_dict(),
+                "regressor": model.regressor.state_dict(),
             }
-            print("  ✓ New best checkpoint")
-        
+            print("  ✓ New best (Stage 3 v2)")
+
         if early_stopping(val_loss, epoch):
             print(f"  Early stopping at epoch {epoch}")
             break
-    
-    if best_state:
-        model.encoder.load_state_dict(best_state['encoder'])
-        model.regressor.load_state_dict(best_state['regressor'])
-    
-    for param in model.parameters():
-        param.requires_grad = True
-    
+
+    if best_state is not None:
+        model.encoder.load_state_dict(best_state["encoder"])
+        model.regressor.load_state_dict(best_state["regressor"])
+
     stage_time = time.time() - stage_start_time
-    final_epsilon = accountant.get_epsilon(dp_config.target_delta) if dp_config.enabled else float('inf')
-    
+    final_epsilon = (
+        accountant.get_epsilon(dp_config.target_delta)
+        if dp_config.enabled
+        else float("inf")
+    )
+
     print(f"\nStage 3 completed in {stage_time:.2f}s ({stage_time/60:.2f} min)")
     print(f"Final ε: {final_epsilon:.3f} (target: {dp_config.target_epsilon})")
-    
+
     return history, accountant, stage_time
 
 def final_evaluation(
@@ -1254,14 +1213,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--use_node_level', action='store_true', default=True, help='Use node-level labels')
     parser.add_argument('--weather_file', type=str, default='weather_cn.npy')
     parser.add_argument('--period_hours', type=int, default=24)
-    parser.add_argument('--stage1_epochs', type=int, default=6)
-    parser.add_argument('--stage2_epochs', type=int, default=10)
-    parser.add_argument('--stage3_epochs', type=int, default=10, help='Epochs for non-delayed regressor')
+    parser.add_argument('--stage1_epochs', type=int, default=1)
+    parser.add_argument('--stage2_epochs', type=int, default=2)
+    parser.add_argument('--stage3_epochs', type=int, default=2, help='Epochs for non-delayed regressor')
     parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--lr', type=float, default=0.001)
+    parser.add_argument('--lr', type=float, default=0.006)
     parser.add_argument('--patience', type=int, default=5)
     parser.add_argument('--dp', default=True, action='store_true', help='Enable DP-SGD')
-    parser.add_argument('--target_epsilon', type=float, default=5.0)
+    parser.add_argument('--target_epsilon', type=float, default=7.0)
     parser.add_argument('--target_delta', type=float, default=1e-5)
     parser.add_argument('--noise_multiplier', type=float, default=2)
     parser.add_argument('--max_grad_norm', type=float, default=1.5)

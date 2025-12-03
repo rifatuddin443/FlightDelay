@@ -138,7 +138,7 @@ def _evaluate_three_stage_per_horizon(
     targets_h = targets_denorm.reshape(-1, num_forecast_steps, delay_dim)
     
     # Get ground truth masks based on ACTUAL delays (not predictions)
-    true_delayed_mask = np.any(targets_denorm.reshape(-1, num_forecast_steps, delay_dim) >= delay_threshold, axis=(1, 2))
+    true_delayed_mask = np.any(np.abs(targets_denorm.reshape(-1, num_forecast_steps, delay_dim)) >= delay_threshold, axis=(1, 2))
     true_nondelayed_mask = ~true_delayed_mask
     
     print(f"\n[GROUND TRUTH] Delayed samples: {true_delayed_mask.sum()} | Non-delayed samples: {true_nondelayed_mask.sum()}")
@@ -342,8 +342,170 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hidden_channels", type=int, default=32)
     parser.add_argument("--summary_csv", type=str, default="three_stage_test_summary.csv")
     parser.add_argument("--predictions_csv", type=str, default="three_stage_test_predictions.csv")
+    parser.add_argument("--results_table_csv", type=str, default="results_table.csv")
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
+
+
+def save_results_table(
+    csv_path: str,
+    epsilon: float,
+    delta: float,
+    per_horizon_delayed_metrics: Dict[int, Dict[str, float]],
+    per_horizon_nondelayed_metrics: Dict[int, Dict[str, float]],
+    per_horizon_overall_metrics: Dict[int, Dict[str, float]],
+    cls_metrics: Dict[str, float],
+    horizons: List[int],
+    model_path: str,
+    args,
+) -> None:
+    """Save comprehensive results table with all metrics."""
+    
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        
+        # Header section
+        writer.writerow(["=" * 80])
+        writer.writerow(["COMPREHENSIVE EVALUATION RESULTS"])
+        writer.writerow(["=" * 80])
+        writer.writerow([])
+        
+        # Model and configuration info
+        writer.writerow(["MODEL INFORMATION"])
+        writer.writerow(["Model Path", model_path])
+        writer.writerow(["Model Type", "Three-Stage DP"])
+        writer.writerow(["Data Source", args.data_source])
+        writer.writerow(["Sequence Length", args.seq_len])
+        writer.writerow(["Delay Threshold", f"{args.delay_threshold} min"])
+        writer.writerow(["Classification Threshold", args.class_threshold])
+        writer.writerow(["Final Epsilon", f"{epsilon:.3f}"])
+        writer.writerow(["Final Delta", f"{delta:.2e}"])
+        writer.writerow([])
+        
+        # Classification metrics
+        writer.writerow(["=" * 80])
+        writer.writerow(["CLASSIFICATION METRICS"])
+        writer.writerow(["=" * 80])
+        writer.writerow(["Metric", "Value"])
+        writer.writerow(["Precision", f"{cls_metrics['precision']:.4f}"])
+        writer.writerow(["Recall", f"{cls_metrics['recall']:.4f}"])
+        writer.writerow(["F1 Score", f"{cls_metrics['f1']:.4f}"])
+        writer.writerow(["Accuracy", f"{cls_metrics['accuracy']:.4f}"])
+        writer.writerow([])
+        
+        # Overall summary table (the main table you wanted)
+        writer.writerow(["=" * 80])
+        writer.writerow(["OVERALL SUMMARY TABLE"])
+        writer.writerow(["=" * 80])
+        
+        # Calculate overall MAE
+        all_arrival_maes = [per_horizon_overall_metrics[h]["arrival_mae"] for h in horizons]
+        all_departure_maes = [per_horizon_overall_metrics[h]["departure_mae"] for h in horizons]
+        overall_mae = np.mean(all_arrival_maes + all_departure_maes)
+        
+        # Create header row
+        header = ["Epsilon", "Overall MAE (min)"]
+        for h in horizons:
+            header.append(f"{h}-step Arrival")
+        for h in horizons:
+            header.append(f"{h}-step Departure")
+        header.extend(["Precision", "Recall", "F1 Score", "Accuracy"])
+        writer.writerow(header)
+        
+        # Create data row
+        row = [f"{epsilon:.2f}", f"{overall_mae:.4f}"]
+        for h in horizons:
+            row.append(f"{per_horizon_overall_metrics[h]['arrival_mae']:.4f}")
+        for h in horizons:
+            row.append(f"{per_horizon_overall_metrics[h]['departure_mae']:.4f}")
+        row.extend([
+            f"{cls_metrics['precision']:.4f}",
+            f"{cls_metrics['recall']:.4f}",
+            f"{cls_metrics['f1']:.4f}",
+            f"{cls_metrics['accuracy']:.4f}"
+        ])
+        writer.writerow(row)
+        writer.writerow([])
+        
+        # Detailed per-horizon metrics for DELAYED flights
+        writer.writerow(["=" * 80])
+        writer.writerow(["DETAILED METRICS - DELAYED FLIGHTS (>5 min)"])
+        writer.writerow(["=" * 80])
+        writer.writerow(["Horizon", "Samples", "Arrival MAE", "Arrival RMSE", "Arrival R2", 
+                        "Departure MAE", "Departure RMSE", "Departure R2",
+                        "Mean Arr Pred", "Mean Arr Target", "Mean Dep Pred", "Mean Dep Target"])
+        
+        for horizon in horizons:
+            m = per_horizon_delayed_metrics[horizon]
+            writer.writerow([
+                f"{horizon}-step",
+                m["num_samples"],
+                f"{m['arrival_mae']:.4f}",
+                f"{m['arrival_rmse']:.4f}",
+                f"{m['arrival_r2']:.4f}",
+                f"{m['departure_mae']:.4f}",
+                f"{m['departure_rmse']:.4f}",
+                f"{m['departure_r2']:.4f}",
+                f"{m['mean_arrival_pred']:.2f}",
+                f"{m['mean_arrival_target']:.2f}",
+                f"{m['mean_departure_pred']:.2f}",
+                f"{m['mean_departure_target']:.2f}",
+            ])
+        writer.writerow([])
+        
+        # Detailed per-horizon metrics for NON-DELAYED flights
+        writer.writerow(["=" * 80])
+        writer.writerow(["DETAILED METRICS - NON-DELAYED FLIGHTS (<5 min)"])
+        writer.writerow(["=" * 80])
+        writer.writerow(["Horizon", "Samples", "Arrival MAE", "Arrival RMSE", "Arrival R2", 
+                        "Departure MAE", "Departure RMSE", "Departure R2",
+                        "Mean Arr Pred", "Mean Arr Target", "Mean Dep Pred", "Mean Dep Target"])
+        
+        for horizon in horizons:
+            m = per_horizon_nondelayed_metrics[horizon]
+            writer.writerow([
+                f"{horizon}-step",
+                m["num_samples"],
+                f"{m['arrival_mae']:.4f}",
+                f"{m['arrival_rmse']:.4f}",
+                f"{m['arrival_r2']:.4f}",
+                f"{m['departure_mae']:.4f}",
+                f"{m['departure_rmse']:.4f}",
+                f"{m['departure_r2']:.4f}",
+                f"{m['mean_arrival_pred']:.2f}",
+                f"{m['mean_arrival_target']:.2f}",
+                f"{m['mean_departure_pred']:.2f}",
+                f"{m['mean_departure_target']:.2f}",
+            ])
+        writer.writerow([])
+        
+        # Detailed per-horizon metrics for OVERALL (all flights)
+        writer.writerow(["=" * 80])
+        writer.writerow(["DETAILED METRICS - ALL FLIGHTS (OVERALL)"])
+        writer.writerow(["=" * 80])
+        writer.writerow(["Horizon", "Samples", "Arrival MAE", "Arrival RMSE", "Arrival R2", 
+                        "Departure MAE", "Departure RMSE", "Departure R2",
+                        "Mean Arr Pred", "Mean Arr Target", "Mean Dep Pred", "Mean Dep Target"])
+        
+        for horizon in horizons:
+            m = per_horizon_overall_metrics[horizon]
+            writer.writerow([
+                f"{horizon}-step",
+                m["num_samples"],
+                f"{m['arrival_mae']:.4f}",
+                f"{m['arrival_rmse']:.4f}",
+                f"{m['arrival_r2']:.4f}",
+                f"{m['departure_mae']:.4f}",
+                f"{m['departure_rmse']:.4f}",
+                f"{m['departure_r2']:.4f}",
+                f"{m['mean_arrival_pred']:.2f}",
+                f"{m['mean_arrival_target']:.2f}",
+                f"{m['mean_departure_pred']:.2f}",
+                f"{m['mean_departure_target']:.2f}",
+            ])
+        writer.writerow([])
+    
+    print(f"\n✓ Comprehensive results table saved to: {csv_path}")
 
 
 def main() -> None:
@@ -560,6 +722,21 @@ def main() -> None:
                 writer.writerow([f"overall_h{horizon}_mean_departure_target", metrics["mean_departure_target"]])
         
         print(f"\n✓ Summary saved to: {args.summary_csv}")
+    
+    # Save results table in organized format
+    if args.results_table_csv:
+        save_results_table(
+            args.results_table_csv,
+            final_epsilon,
+            final_delta,
+            per_horizon_delayed_metrics,
+            per_horizon_nondelayed_metrics,
+            per_horizon_overall_metrics,
+            cls_metrics,
+            horizons,
+            args.model_path,
+            args,
+        )
     
     # Save predictions CSV
     if args.predictions_csv:

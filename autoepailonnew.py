@@ -5,7 +5,6 @@ FIXED:
 2. Automatically computes noise multiplier to achieve target epsilon.
 3. Allows training to complete all epochs while tracking epsilon.
 4. NEW: Added Stage 3 for regressing delays on samples predicted as under threshold.
-5. FIXED: Stage 3 now correctly masks based on actual delay values (< 5 min), not classification labels.
 """
 
 from __future__ import annotations
@@ -746,35 +745,27 @@ def train_stage3_with_dp(
     lr: float,
     scaler,
     class_threshold: float,
-    delay_threshold: float,
     patience: int,
     dp_config: DPConfig,
     batch_size: int,
     stage2_accountant: RDPAccountant,
 ) -> Tuple[List[Dict], RDPAccountant, float]:
-    """FIXED: Train stage 3 with PER-HORIZON masking instead of per-sample masking."""
+    """NEW: Train stage 3 (non-delayed flights regressor) with proper DP-SGD."""
     stage_start_time = time.time()
     print("\n" + "="*80)
     print("STAGE 3: TRAINING DELAY REGRESSOR (NON-DELAYED FLIGHTS) WITH DP-SGD")
-    print(f"Training on flights with |delay| < {delay_threshold} min")
     print("="*80)
     print(f"Train samples: {len(train_x)} | Val samples: {len(val_x)}")
     
-    # Fine-tune encoder + regressor
+    # Reuse Stage 2 architecture: train the SAME regressor on non-delayed samples
+    # This maintains consistency with Stage 2's approach
     for param in model.encoder.parameters():
-        param.requires_grad = True
+        param.requires_grad = False
     for param in model.classifier.parameters():
         param.requires_grad = False
     
-    # Lower learning rate for fine-tuning
-    optimizer = torch.optim.Adam(
-        list(model.encoder.parameters()) + list(model.regressor.parameters()), 
-        lr=lr * 0.1,
-        weight_decay=1e-4
-    )
-    
-    # Use MSE with per-element weighting
-    reg_loss_fn = nn.MSELoss(reduction='none')
+    optimizer = torch.optim.Adam(model.regressor.parameters(), lr=lr, weight_decay=1e-4)
+    reg_loss_fn = nn.MSELoss(reduction='mean')
     
     accountant = RDPAccountant(
         noise_multiplier=dp_config.noise_multiplier,
@@ -790,13 +781,6 @@ def train_stage3_with_dp(
     else:
         print("✗ DP-SGD disabled")
     
-    print(f"✓ Fine-tuning encoder + regressor with LR={lr * 0.1:.6f}")
-    
-    # Determine number of horizons and delay dimensions
-    # Assuming out_channels = num_horizons * delay_dim
-    num_horizons = 3  # 3, 6, 12 step
-    delay_dim = 2     # arrival, departure
-    
     history = []
     best_val_loss = float('inf')
     best_state = None
@@ -806,8 +790,6 @@ def train_stage3_with_dp(
         epoch_start_time = time.time()
         model.train()
         epoch_losses = []
-        total_nondelayed_values = 0
-        total_values = 0
         
         num_samples = train_x.shape[0]
         indices = torch.randperm(num_samples)
@@ -817,16 +799,13 @@ def train_stage3_with_dp(
             batch_indices = indices[start_idx:end_idx]
             batch_x = train_x[batch_indices].to(device)
             batch_y_reg = train_y_reg[batch_indices].to(device)
+            batch_y_cls = train_y_cls[batch_indices].to(device)
             
             optimizer.zero_grad(set_to_none=True)
             
             if dp_config.enabled:
-                # For DP-SGD, we need per-sample gradients
-                # This is complex with element-wise masking, so fall back to sample-level
                 per_sample_grads = clipper.compute_per_sample_gradients(
-                    batch_x, batch_y_reg, edge_indices, 
-                    lambda p, t: reg_loss_fn(p, t).mean(), 
-                    is_classification=False
+                    batch_x, batch_y_reg, edge_indices, reg_loss_fn, is_classification=False
                 )
                 noisy_grads = clipper.add_noise_to_gradients(
                     per_sample_grads,
@@ -855,42 +834,20 @@ def train_stage3_with_dp(
                     reg_preds = torch.cat(reg_preds, dim=0)
                     reg_targets = torch.cat(reg_targets, dim=0)
                     
-                    # Denormalize to check threshold
-                    if scaler is not None:
-                        targets_denorm = torch.from_numpy(
-                            scaler.inverse_transform(reg_targets.cpu().numpy())
-                        ).to(device)
-                        preds_denorm = torch.from_numpy(
-                            scaler.inverse_transform(reg_preds.cpu().numpy())
-                        ).to(device)
-                    else:
-                        targets_denorm = reg_targets
-                        preds_denorm = reg_preds
+                    # Mask: train only on NON-delayed flights (< threshold)
+                    cls_mask = []
+                    for i in range(len(batch_y_cls)):
+                        graph_cls = ensure_graph_level_target(batch_y_cls[i])
+                        cls_mask.append(graph_cls)
+                    cls_mask = torch.cat(cls_mask, dim=0)
+                    mask = (cls_mask < class_threshold).float()
+                    if mask.dim() == 1:
+                        mask = mask.unsqueeze(-1)
                     
-                    # FIXED: Create element-wise mask (not sample-wise)
-                    # Shape: [batch_size, num_horizons * delay_dim]
-                    # Mask out only the specific delay values that exceed threshold
-                    element_mask = (targets_denorm.abs() < delay_threshold).float()
-                    
-                    # Apply mask element-wise
-                    masked_preds = preds_denorm * element_mask
-                    masked_targets = targets_denorm * element_mask
-                    
-                    # Compute loss only on non-delayed elements
-                    loss_per_element = (masked_preds - masked_targets) ** 2
-                    num_nondelayed = element_mask.sum()
-                    
-                    if num_nondelayed > 0:
-                        loss = loss_per_element.sum() / num_nondelayed
-                    else:
-                        loss = torch.tensor(0.0, device=device)
-                    
-                    total_nondelayed_values += num_nondelayed.item()
-                    total_values += element_mask.numel()
+                    loss = reg_loss_fn(reg_preds * mask, reg_targets * mask)
                 
                 accountant.step()
             else:
-                # Non-DP path with element-wise masking
                 reg_preds = []
                 reg_targets = []
                 for i in range(len(batch_x)):
@@ -908,41 +865,25 @@ def train_stage3_with_dp(
                 reg_preds = torch.cat(reg_preds, dim=0)
                 reg_targets = torch.cat(reg_targets, dim=0)
                 
-                # Denormalize
-                if scaler is not None:
-                    targets_denorm = torch.from_numpy(
-                        scaler.inverse_transform(reg_targets.cpu().numpy())
-                    ).to(device)
-                else:
-                    targets_denorm = reg_targets
+                # Mask: train only on NON-delayed flights
+                cls_mask = []
+                for i in range(len(batch_y_cls)):
+                    graph_cls = ensure_graph_level_target(batch_y_cls[i])
+                    cls_mask.append(graph_cls)
+                cls_mask = torch.cat(cls_mask, dim=0)
+                mask = (cls_mask < class_threshold).float()
+                if mask.dim() == 1:
+                    mask = mask.unsqueeze(-1)
                 
-                # FIXED: Element-wise masking
-                # Re-normalize after creating mask
-                element_mask = (targets_denorm.abs() < delay_threshold).float()
-                
-                # Compute loss on normalized values with mask
-                loss_per_element = reg_loss_fn(reg_preds, reg_targets) * element_mask
-                num_nondelayed = element_mask.sum()
-                
-                if num_nondelayed > 0:
-                    loss = loss_per_element.sum() / num_nondelayed
-                else:
-                    loss = torch.tensor(0.0, device=device)
-                
-                total_nondelayed_values += num_nondelayed.item()
-                total_values += element_mask.numel()
-                
+                loss = reg_loss_fn(reg_preds * mask, reg_targets * mask)
                 loss.backward()
             
             optimizer.step()
             epoch_losses.append(loss.item())
         
-        # Validation with element-wise masking
+        # Validation
         model.eval()
         val_losses = []
-        val_nondelayed_values = 0
-        val_total_values = 0
-        
         with torch.no_grad():
             for i in range(len(val_x)):
                 data = Data(
@@ -954,26 +895,16 @@ def train_stage3_with_dp(
                 _, node_reg = model(data)
                 graph_reg = aggregate_node_to_graph(node_reg)
                 graph_target = ensure_graph_level_target(val_y_reg[i])
+                graph_cls = ensure_graph_level_target(val_y_cls[i])
                 
-                if scaler is not None:
-                    target_denorm = torch.from_numpy(
-                        scaler.inverse_transform(graph_target.cpu().numpy())
-                    ).to(device)
-                else:
-                    target_denorm = graph_target
+                mask = (graph_cls < class_threshold).float()
+                if mask.dim() == 1:
+                    mask = mask.unsqueeze(-1)
                 
-                # Element-wise mask
-                element_mask = (target_denorm.abs() < delay_threshold).float()
-                num_nondelayed = element_mask.sum()
-                
-                if num_nondelayed > 0:
-                    loss_per_element = nn.MSELoss(reduction='none')(graph_reg.cpu(), graph_target) * element_mask.cpu()
-                    loss = loss_per_element.sum() / num_nondelayed
-                    val_losses.append(loss.item())
-                    val_nondelayed_values += num_nondelayed.item()
-                    val_total_values += element_mask.numel()
+                loss = reg_loss_fn(graph_reg.cpu() * mask, graph_target * mask)
+                val_losses.append(loss.item())
         
-        val_loss = np.mean(val_losses) if val_losses else 0.0
+        val_loss = np.mean(val_losses)
         epoch_time = time.time() - epoch_start_time
         
         if dp_config.enabled:
@@ -981,18 +912,11 @@ def train_stage3_with_dp(
         else:
             current_epsilon = float('inf')
         
-        nondelayed_ratio = total_nondelayed_values / total_values if total_values > 0 else 0
-        val_nondelayed_ratio = val_nondelayed_values / val_total_values if val_total_values > 0 else 0
-        
         history.append({
             'epoch': epoch,
             'stage': 3,
             'train_loss': float(np.mean(epoch_losses)) if epoch_losses else 0.0,
-            'train_nondelayed_values': total_nondelayed_values,
-            'train_nondelayed_ratio': nondelayed_ratio,
             'val_loss': val_loss,
-            'val_nondelayed_values': val_nondelayed_values,
-            'val_nondelayed_ratio': val_nondelayed_ratio,
             'epsilon': current_epsilon,
             'delta': dp_config.target_delta if dp_config.enabled else 0.0,
             'epoch_time_seconds': epoch_time,
@@ -1001,18 +925,13 @@ def train_stage3_with_dp(
         
         eps_str = f"ε: {current_epsilon:.3f}/{dp_config.target_epsilon}" if dp_config.enabled else "No DP"
         print(
-            f"Epoch {epoch}/{epochs} | Loss: {history[-1]['train_loss']:.4f} | "
-            f"Val Loss: {val_loss:.4f} | Non-delayed: {total_nondelayed_values}/{total_values} ({nondelayed_ratio:.1%}) | "
-            f"Val: {val_nondelayed_values}/{val_total_values} ({val_nondelayed_ratio:.1%}) | "
-            f"{eps_str} | Time: {epoch_time:.2f}s"
+            f"Epoch {epoch}/{epochs} | Train Loss: {history[-1]['train_loss']:.4f} | "
+            f"Val Loss: {val_loss:.4f} | {eps_str} | Time: {epoch_time:.2f}s"
         )
         
-        if val_loss < best_val_loss and val_nondelayed_values > 0:
+        if val_loss < best_val_loss:
             best_val_loss = val_loss
-            best_state = {
-                'encoder': model.encoder.state_dict(),
-                'regressor': model.regressor.state_dict()
-            }
+            best_state = model.regressor.state_dict()
             print("  ✓ New best checkpoint")
         
         if early_stopping(val_loss, epoch):
@@ -1020,8 +939,7 @@ def train_stage3_with_dp(
             break
     
     if best_state:
-        model.encoder.load_state_dict(best_state['encoder'])
-        model.regressor.load_state_dict(best_state['regressor'])
+        model.regressor.load_state_dict(best_state)
     
     for param in model.parameters():
         param.requires_grad = True
@@ -1033,6 +951,7 @@ def train_stage3_with_dp(
     print(f"Final ε: {final_epsilon:.3f} (target: {dp_config.target_epsilon})")
     
     return history, accountant, stage_time
+
 
 def final_evaluation(
     model: SequentialTwoStagePredictor,
@@ -1125,7 +1044,7 @@ def final_evaluation(
         test_cls_targets.reshape(-1, 1),
     )
     
-    # Apply classifier gating
+    # Use classifier gating as in Stage 2
     test_mask = (test_probs >= class_threshold)
     gated_preds = test_reg_preds * test_mask
     
@@ -1136,7 +1055,7 @@ def final_evaluation(
         preds_denorm = gated_preds
         targets_denorm = test_reg_targets
     
-    # Evaluate on delayed flights
+    # Evaluate on delayed flights (using gated predictions)
     delayed_mask = test_cls_targets.flatten() >= class_threshold
     if delayed_mask.sum() > 0:
         delayed_preds = preds_denorm[delayed_mask]
@@ -1146,17 +1065,7 @@ def final_evaluation(
     else:
         mae_delayed, rmse_delayed = 0.0, 0.0
     
-    # Evaluate on non-delayed flights
-    nondelayed_mask = test_cls_targets.flatten() < class_threshold
-    if nondelayed_mask.sum() > 0:
-        nondelayed_preds = preds_denorm[nondelayed_mask]
-        nondelayed_targets = targets_denorm[nondelayed_mask]
-        mae_nondelayed = np.mean(np.abs(nondelayed_preds - nondelayed_targets))
-        rmse_nondelayed = np.sqrt(np.mean((nondelayed_preds - nondelayed_targets) ** 2))
-    else:
-        mae_nondelayed, rmse_nondelayed = 0.0, 0.0
-    
-    # Overall metrics
+    # Overall metrics (all samples)
     mae_overall = np.mean(np.abs(preds_denorm - targets_denorm))
     rmse_overall = np.sqrt(np.mean((preds_denorm - targets_denorm) ** 2))
     
@@ -1164,15 +1073,11 @@ def final_evaluation(
     print(f"  Precision: {test_cls_metrics['precision']:.4f} | Recall: {test_cls_metrics['recall']:.4f}")
     print(f"  F1: {test_cls_metrics['f1']:.4f} | Accuracy: {test_cls_metrics['accuracy']:.4f}")
     
-    print("\nREGRESSION (delayed flights only):")
+    print("\nREGRESSION (delayed flights only, gated by classifier):")
     print(f"  MAE: {mae_delayed:.4f} min | RMSE: {rmse_delayed:.4f} min")
     print(f"  Number of delayed samples: {delayed_mask.sum()}")
     
-    print("\nREGRESSION (non-delayed flights only):")
-    print(f"  MAE: {mae_nondelayed:.4f} min | RMSE: {rmse_nondelayed:.4f} min")
-    print(f"  Number of non-delayed samples: {nondelayed_mask.sum()}")
-    
-    print("\nREGRESSION (overall):")
+    print("\nREGRESSION (overall, all samples):")
     print(f"  MAE: {mae_overall:.4f} min | RMSE: {rmse_overall:.4f} min")
     
     print("\nPRIVACY BUDGET:")
@@ -1215,12 +1120,9 @@ def final_evaluation(
             'classification_accuracy': test_cls_metrics['accuracy'],
             'regression_mae_delayed': mae_delayed,
             'regression_rmse_delayed': rmse_delayed,
-            'regression_mae_nondelayed': mae_nondelayed,
-            'regression_rmse_nondelayed': rmse_nondelayed,
             'regression_mae_overall': mae_overall,
             'regression_rmse_overall': rmse_overall,
             'num_delayed_samples': int(delayed_mask.sum()),
-            'num_nondelayed_samples': int(nondelayed_mask.sum()),
             'target_epsilon': dp_config.target_epsilon,
             'final_epsilon': final_epsilon,
             'epsilon_exceeded': final_epsilon > dp_config.target_epsilon if dp_config.enabled else False,
@@ -1254,21 +1156,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--use_node_level', action='store_true', default=True, help='Use node-level labels')
     parser.add_argument('--weather_file', type=str, default='weather_cn.npy')
     parser.add_argument('--period_hours', type=int, default=24)
-    parser.add_argument('--stage1_epochs', type=int, default=6)
+    parser.add_argument('--stage1_epochs', type=int, default=5)
     parser.add_argument('--stage2_epochs', type=int, default=10)
     parser.add_argument('--stage3_epochs', type=int, default=10, help='Epochs for non-delayed regressor')
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--patience', type=int, default=5)
     parser.add_argument('--dp', default=True, action='store_true', help='Enable DP-SGD')
-    parser.add_argument('--target_epsilon', type=float, default=5.0)
+    parser.add_argument('--target_epsilon', type=float, default=15.0)
     parser.add_argument('--target_delta', type=float, default=1e-5)
     parser.add_argument('--noise_multiplier', type=float, default=2)
     parser.add_argument('--max_grad_norm', type=float, default=1.5)
     parser.add_argument('--sample_rate', type=float, default=0.02)
     parser.add_argument('--epsilon_tolerance', type=float, default=0.05)
     parser.add_argument('--model_path', type=str, default='kan_gat_dp_three_stage.pth')
-    parser.add_argument('--seed', type=int, default=None, help='Random seed (None for random)')
+    parser.add_argument('--seed', type=int, default=42)
     return parser.parse_args()
 
 
@@ -1278,8 +1180,7 @@ def main() -> None:
     if args.data_source == 'udata':
         args.weather_file = 'weather2016_2021.npy'
     
-    if args.seed is not None:
-        set_seed(args.seed)
+    set_seed(args.seed)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Device: {device}")
     
@@ -1393,7 +1294,6 @@ def main() -> None:
         model, train_x, train_y_reg, train_y_cls,
         val_x, val_y_reg, val_y_cls, edge_indices, device,
         args.stage3_epochs, args.lr, scaler, args.class_threshold,
-        args.delay_threshold,  # FIXED: Pass actual delay threshold
         args.patience, dp_config, args.batch_size, accountant_s2,
     )
     

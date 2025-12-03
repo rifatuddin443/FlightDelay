@@ -1,0 +1,109 @@
+================================================================================,,,,,,,,,,,,,,
+COMPREHENSIVE EVALUATION RESULTS,,,,,,,,,,,,,,
+================================================================================,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,
+MODEL INFORMATION,,,,,,,,,,,,,,
+Model Path,kan_gat_dp_three_stage.pth,,,,,,,,,,,,,
+Model Type,Three-Stage DP,,,,,,,,,,,,,
+Data Source,udata,,,,,,,,,,,,,[GROUND TRUTH] Delayed samples: 4091 | Non-delayed samples: 11672
+Sequence Length,8,,,,,,,,,,,,,
+Delay Threshold,5.0 min,,,,,,,,,,,,,================================================================================
+Classification Threshold,0.5,,,,,,,,,,,,,TEST RESULTS - THREE-STAGE MODEL
+Final Epsilon,5.99,,,,,,,,,,,,,================================================================================
+Final Delta,1.00E-05,,,,,,,,,,,,,
+,,,,,,,,,,,,,,CLASSIFICATION METRICS:
+================================================================================,,,,,,,,,,,,,,  Precision: 0.9881 | Recall: 0.5680 | F1: 0.7214 | Accuracy: 0.7476
+CLASSIFICATION METRICS,,,,,,,,,,,,,,
+================================================================================,,,,,,,,,,,,,,================================================================================
+Metric,Value,,,,,,,,,,,,,PER-HORIZON RESULTS FOR DELAYED FLIGHTS (>5 min)
+Precision,0.9881,,,,,,,,,,,,,================================================================================
+Recall,0.5665,,,,,,,,,,,,,
+F1 Score,0.7201,,,,,,,,,,,,,3-STEP AHEAD PREDICTIONS (Delayed Flights):
+Accuracy,0.7467,,,,,,,,,,,,,  Samples: 4091
+,,,,,,,,,,,,,,  Arrival Delay:
+================================================================================,,,,,,,,,,,,,,    MAE: 2.2170 min | RMSE: 2.7623 min | R²: 0.5732
+OVERALL SUMMARY TABLE,,,,,,,,,,,,,,    Mean Predicted: 1.99 min | Mean Target: 0.55 min
+================================================================================,,,,,,,,,,,,,,  Departure Delay:
+Epsilon,Overall MAE (min),3-step Arrival,6-step Arrival,12-step Arrival,3-step Departure,6-step Departure,12-step Departure,Precision,Recall,F1 Score,Accuracy,,,    MAE: 1.5461 min | RMSE: 1.9990 min | R²: 0.5605
+5.99,3.3904,4.7786,4.9614,5.2967,1.5209,1.6481,2.1364,0.9881,0.5665,0.7201,0.7467,,,    Mean Predicted: 5.12 min | Mean Target: 5.88 min
+,,,,,,,,,,,,,,
+================================================================================,,,,,,,,,,,,,,6-STEP AHEAD PREDICTIONS (Delayed Flights):
+DETAILED METRICS - DELAYED FLIGHTS (>5 min),,,,,,,,,,,,,,  Samples: 4091
+================================================================================,,,,,,,,,,,,,,  Arrival Delay:
+Horizon,Samples,Arrival MAE,Arrival RMSE,Arrival R2,Departure MAE,Departure RMSE,Departure R2,Mean Arr Pred,Mean Arr Target,Mean Dep Pred,Mean Dep Target,,,    MAE: 2.3185 min | RMSE: 2.8920 min | R²: 0.4648
+3-step,13854,5.1006,6.0307,-0.6245,1.5335,1.9248,0.7407,0.45,-4.35,1.52,1.24,,,    Mean Predicted: 2.50 min | Mean Target: 1.04 min
+6-step,13854,5.2698,6.1301,-0.6624,1.6649,2.0787,0.6975,0.68,-4.33,1.5,1.25,,,  Departure Delay:
+12-step,13854,5.6092,6.4268,-0.8292,2.149,2.6976,0.4863,0.9,-4.35,1.34,1.31,,,    MAE: 1.8982 min | RMSE: 2.3931 min | R²: 0.3543
+,,,,,,,,,,,,,,    Mean Predicted: 5.03 min | Mean Target: 5.93 min
+================================================================================,,,,,,,,,,,,,,
+DETAILED METRICS - NON-DELAYED FLIGHTS (<5 min),,,,,,,,,,,,,,12-STEP AHEAD PREDICTIONS (Delayed Flights):
+================================================================================,,,,,,,,,,,,,,  Samples: 4091
+Horizon,Samples,Arrival MAE,Arrival RMSE,Arrival R2,Departure MAE,Departure RMSE,Departure R2,Mean Arr Pred,Mean Arr Target,Mean Dep Pred,Mean Dep Target,,,  Arrival Delay:
+3-step,1909,2.4414,2.7983,-0.7718,1.4299,1.8176,-0.1417,-0.04,-2.18,1.27,1.85,,,    MAE: 3.2644 min | RMSE: 4.2934 min | R²: -0.1066
+6-step,1909,2.7227,3.0816,-1.754,1.5266,1.925,-0.1944,0.29,-2.3,1.33,1.73,,,    Mean Predicted: 3.06 min | Mean Target: 1.05 min
+12-step,1909,3.0284,3.4734,-2.7727,2.045,2.5567,-0.5763,0.74,-2.15,1.5,1.34,,,  Departure Delay:
+,,,,,,,,,,,,,,    MAE: 3.0203 min | RMSE: 3.6569 min | R²: -0.0756
+================================================================================,,,,,,,,,,,,,,    Mean Predicted: 4.24 min | Mean Target: 5.44 min
+DETAILED METRICS - ALL FLIGHTS (OVERALL),,,,,,,,,,,,,,
+================================================================================,,,,,,,,,,,,,,================================================================================
+Horizon,Samples,Arrival MAE,Arrival RMSE,Arrival R2,Departure MAE,Departure RMSE,Departure R2,Mean Arr Pred,Mean Arr Target,Mean Dep Pred,Mean Dep Target,,,PER-HORIZON RESULTS FOR NON-DELAYED FLIGHTS (<5 min)
+3-step,15763,4.7786,5.737,-0.589,1.5209,1.9121,0.7176,0.39,-4.09,1.49,1.31,,,================================================================================
+6-step,15763,4.9614,5.8462,-0.6492,1.6481,2.0607,0.6722,0.63,-4.09,1.48,1.31,,,NOTE: Stage 3 trains the regressor on non-delayed flights to produce accurate small delays
+12-step,15763,5.2967,6.1451,-0.8202,2.1364,2.6809,0.4451,0.88,-4.08,1.36,1.31,,,
+,,,,,,,,,,,,,,3-STEP AHEAD PREDICTIONS (Non-Delayed Flights):
+,,,,,,,,,,,,,,  Samples: 11672
+,,,,,,,,,,,,,,  Arrival Delay:
+,,,,,,,,,,,,,,    MAE: 5.6698 min | RMSE: 6.4549 min | R²: -2.6218
+,,,,,,,,,,,,,,    Mean Predicted: -0.16 min | Mean Target: -5.72 min
+,,,,,,,,,,,,,,  Departure Delay:
+,,,,,,,,,,,,,,    MAE: 1.5034 min | RMSE: 1.8717 min | R²: 0.2025
+,,,,,,,,,,,,,,    Mean Predicted: 0.24 min | Mean Target: -0.29 min
+,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,6-STEP AHEAD PREDICTIONS (Non-Delayed Flights):
+,,,,,,,,,,,,,,  Samples: 11672
+,,,,,,,,,,,,,,  Arrival Delay:
+,,,,,,,,,,,,,,    MAE: 5.8492 min | RMSE: 6.5537 min | R²: -3.2555
+,,,,,,,,,,,,,,    Mean Predicted: -0.08 min | Mean Target: -5.88 min
+,,,,,,,,,,,,,,  Departure Delay:
+,,,,,,,,,,,,,,    MAE: 1.5523 min | RMSE: 1.9225 min | R²: 0.1348
+,,,,,,,,,,,,,,    Mean Predicted: 0.29 min | Mean Target: -0.31 min
+,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,12-STEP AHEAD PREDICTIONS (Non-Delayed Flights):
+,,,,,,,,,,,,,,  Samples: 11672
+,,,,,,,,,,,,,,  Arrival Delay:
+,,,,,,,,,,,,,,    MAE: 5.9975 min | RMSE: 6.6671 min | R²: -3.5711
+,,,,,,,,,,,,,,    Mean Predicted: 0.09 min | Mean Target: -5.88 min
+,,,,,,,,,,,,,,  Departure Delay:
+,,,,,,,,,,,,,,    MAE: 1.8442 min | RMSE: 2.2685 min | R²: -0.0143
+,,,,,,,,,,,,,,    Mean Predicted: 0.35 min | Mean Target: -0.13 min
+,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,================================================================================
+,,,,,,,,,,,,,,PER-HORIZON RESULTS FOR ALL FLIGHTS (OVERALL)
+,,,,,,,,,,,,,,================================================================================
+,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,3-STEP AHEAD PREDICTIONS (All Flights):
+,,,,,,,,,,,,,,  Samples: 15763
+,,,,,,,,,,,,,,  Arrival Delay:
+,,,,,,,,,,,,,,    MAE: 4.7737 min | RMSE: 5.7299 min | R²: -0.5852
+,,,,,,,,,,,,,,    Mean Predicted: 0.40 min | Mean Target: -4.09 min
+,,,,,,,,,,,,,,  Departure Delay:
+,,,,,,,,,,,,,,    MAE: 1.5145 min | RMSE: 1.9055 min | R²: 0.7195
+,,,,,,,,,,,,,,    Mean Predicted: 1.51 min | Mean Target: 1.31 min
+,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,6-STEP AHEAD PREDICTIONS (All Flights):
+,,,,,,,,,,,,,,  Samples: 15763
+,,,,,,,,,,,,,,  Arrival Delay:
+,,,,,,,,,,,,,,    MAE: 4.9328 min | RMSE: 5.8288 min | R²: -0.6394
+,,,,,,,,,,,,,,    Mean Predicted: 0.59 min | Mean Target: -4.09 min
+,,,,,,,,,,,,,,  Departure Delay:
+,,,,,,,,,,,,,,    MAE: 1.6421 min | RMSE: 2.0550 min | R²: 0.6740
+,,,,,,,,,,,,,,    Mean Predicted: 1.52 min | Mean Target: 1.31 min
+,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,12-STEP AHEAD PREDICTIONS (All Flights):
+,,,,,,,,,,,,,,  Samples: 15763
+,,,,,,,,,,,,,,  Arrival Delay:
+,,,,,,,,,,,,,,    MAE: 5.2882 min | RMSE: 6.1399 min | R²: -0.8171
+,,,,,,,,,,,,,,    Mean Predicted: 0.86 min | Mean Target: -4.08 min
+,,,,,,,,,,,,,,  Departure Delay:
+,,,,,,,,,,,,,,    MAE: 2.1494 min | RMSE: 2.6984 min | R²: 0.4378
+,,,,,,,,,,,,,,    Mean Predicted: 1.36 min | Mean Target: 1.31 min

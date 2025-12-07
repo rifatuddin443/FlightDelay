@@ -360,7 +360,15 @@ def train_stage1_with_dp(
     best_state = None
     early_stopping = EarlyStopping(patience=patience, mode="max")
     
-    for epoch in range(1, epochs + 1):
+    start_epoch = 0
+    checkpoint_path = os.path.join(CHECKPOINT_DIR, 'stage1_checkpoint.pth') if CHECKPOINT_DIR else None
+
+    # Check if checkpoint exists to resume
+    if checkpoint_path and os.path.exists(checkpoint_path):
+        start_epoch, _ = load_checkpoint(model, optimizer, checkpoint_path)
+        print(f"Resuming Stage 1 from epoch {start_epoch}")
+
+    for epoch in range(start_epoch, epochs + 1):
         epoch_start_time = time.time()
         model.train()
         epoch_losses = []
@@ -493,6 +501,10 @@ def train_stage1_with_dp(
                 'classifier': model.classifier.state_dict(),
             }
             print("  ✓ New best checkpoint")
+            # Save checkpoint to disk for resume capability
+            if checkpoint_path:
+                save_checkpoint(model, optimizer, epoch, history[-1]['train_loss'], checkpoint_path)
+                print(f"  ✓ Checkpoint saved to {checkpoint_path}")
         
         if early_stopping(val_metrics['f1'], epoch):
             print(f"  Early stopping at epoch {epoch}")
@@ -567,7 +579,15 @@ def train_stage2_with_dp(
     best_state = None
     early_stopping = EarlyStopping(patience=patience, mode="min")
     
-    for epoch in range(1, epochs + 1):
+    start_epoch = 0
+    checkpoint_path = os.path.join(CHECKPOINT_DIR, 'stage2_checkpoint.pth') if CHECKPOINT_DIR else None
+
+    # Check if checkpoint exists to resume
+    if checkpoint_path and os.path.exists(checkpoint_path):
+        start_epoch, _ = load_checkpoint(model, optimizer, checkpoint_path)
+        print(f"Resuming Stage 2 from epoch {start_epoch}")
+
+    for epoch in range(start_epoch, epochs + 1):
         epoch_start_time = time.time()
         model.train()
         epoch_losses = []
@@ -712,6 +732,10 @@ def train_stage2_with_dp(
             best_val_loss = val_loss
             best_state = model.regressor.state_dict()
             print("  ✓ New best checkpoint")
+            # Save checkpoint to disk for resume capability
+            if checkpoint_path:
+                save_checkpoint(model, optimizer, epoch, val_loss, checkpoint_path)
+                print(f"  ✓ Checkpoint saved to {checkpoint_path}")
         
         if early_stopping(val_loss, epoch):
             print(f"  Early stopping at epoch {epoch}")
@@ -793,7 +817,15 @@ def train_stage3_with_dp(
     # Epoch at which to unfreeze encoder (progressive fine-tuning)
     unfreeze_epoch = max(2, epochs // 2)
 
-    for epoch in range(1, epochs + 1):
+    start_epoch = 0
+    checkpoint_path = os.path.join(CHECKPOINT_DIR, 'stage3_checkpoint.pth') if CHECKPOINT_DIR else None
+
+    # Check if checkpoint exists to resume
+    if checkpoint_path and os.path.exists(checkpoint_path):
+        start_epoch, _ = load_checkpoint(model, optimizer, checkpoint_path)
+        print(f"Resuming Stage 3 from epoch {start_epoch}")
+
+    for epoch in range(start_epoch, epochs + 1):
         # Progressive unfreezing of encoder
         if epoch == unfreeze_epoch:
             print("  → Unfreezing encoder with very low LR...")
@@ -821,6 +853,7 @@ def train_stage3_with_dp(
             batch_indices = indices[start_idx:end_idx]
             batch_x = train_x[batch_indices].to(device)
             batch_y_reg = train_y_reg[batch_indices].to(device)
+            batch_y_cls = train_y_cls[batch_indices].to(device)
 
             optimizer.zero_grad(set_to_none=True)
 
@@ -972,6 +1005,10 @@ def train_stage3_with_dp(
                 "regressor": model.regressor.state_dict(),
             }
             print("  ✓ New best (Stage 3 v2)")
+            # Save checkpoint to disk for resume capability
+            if checkpoint_path:
+                save_checkpoint(model, optimizer, epoch, val_loss, checkpoint_path)
+                print(f"  ✓ Checkpoint saved to {checkpoint_path}")
 
         if early_stopping(val_loss, epoch):
             print(f"  Early stopping at epoch {epoch}")
@@ -1203,6 +1240,20 @@ def final_evaluation(
     print(f"  - kan_gat_dp_three_stage_summary.csv")
 
 
+def save_checkpoint(model, optimizer, epoch, loss, path):
+    torch.save({
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'loss': loss,
+    }, path)
+
+def load_checkpoint(model, optimizer, path):
+    checkpoint = torch.load(path)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    return checkpoint['epoch'], checkpoint['loss']
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Three-stage DP-SGD for KAN-GAT with epsilon budget control")
     parser.add_argument('--data_source', type=str, default='udata', choices=['cdata', 'udata'])
@@ -1213,9 +1264,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--use_node_level', action='store_true', default=True, help='Use node-level labels')
     parser.add_argument('--weather_file', type=str, default='weather_cn.npy')
     parser.add_argument('--period_hours', type=int, default=24)
-    parser.add_argument('--stage1_epochs', type=int, default=1)
-    parser.add_argument('--stage2_epochs', type=int, default=2)
-    parser.add_argument('--stage3_epochs', type=int, default=2, help='Epochs for non-delayed regressor')
+    parser.add_argument('--stage1_epochs', type=int, default=7)
+    parser.add_argument('--stage2_epochs', type=int, default=10)
+    parser.add_argument('--stage3_epochs', type=int, default=10, help='Epochs for non-delayed regressor')
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=0.006)
     parser.add_argument('--patience', type=int, default=5)
@@ -1232,7 +1283,12 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    global CHECKPOINT_DIR
     args = parse_args()
+    
+    # Set up checkpoint directory if not already set
+    if not CHECKPOINT_DIR:
+        CHECKPOINT_DIR = setup_checkpoint_directory()
     
     if args.data_source == 'udata':
         args.weather_file = 'weather2016_2021.npy'
@@ -1374,5 +1430,31 @@ def main() -> None:
     )
 
 
+def setup_checkpoint_directory() -> str:
+    """Set up checkpoint directory based on environment (Colab vs Local)."""
+    import importlib.util
+    
+    # Check if running in Google Colab by checking if the module exists
+    IN_COLAB = importlib.util.find_spec("google.colab") is not None
+    
+    if IN_COLAB:
+        from google.colab import drive  # type: ignore[import-not-found]
+        drive.mount('/content/drive')
+        checkpoint_dir = '/content/drive/MyDrive/flight_delay_checkpoints/'
+        print("✓ Running in Google Colab - checkpoints will be saved to Google Drive")
+    else:
+        # Local machine - save to current directory
+        checkpoint_dir = os.path.join(os.path.dirname(__file__), 'checkpoints')
+        print(f"✓ Running locally - checkpoints will be saved to {checkpoint_dir}")
+    
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    return checkpoint_dir
+
+
+# Global checkpoint directory - set at runtime
+CHECKPOINT_DIR: str = ""
+
+
 if __name__ == '__main__':
+    CHECKPOINT_DIR = setup_checkpoint_directory()
     main()

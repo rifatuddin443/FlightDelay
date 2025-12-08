@@ -1249,7 +1249,9 @@ def save_checkpoint(model, optimizer, epoch, loss, path):
     }, path)
 
 def load_checkpoint(model, optimizer, path):
-    checkpoint = torch.load(path)
+    # Use map_location to handle loading checkpoints saved on different devices
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    checkpoint = torch.load(path, map_location=device, weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     return checkpoint['epoch'], checkpoint['loss']

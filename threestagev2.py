@@ -1430,25 +1430,25 @@ def main() -> None:
     )
 
 
-def setup_checkpoint_directory() -> str:
-    """Set up checkpoint directory based on environment (Colab vs Local)."""
-    import importlib.util
-    
-    # Check if running in Google Colab by checking if the module exists
-    IN_COLAB = importlib.util.find_spec("google.colab") is not None
-    
-    if IN_COLAB:
-        from google.colab import drive  # type: ignore[import-not-found]
-        drive.mount('/content/drive')
-        checkpoint_dir = '/content/drive/MyDrive/flight_delay_checkpoints/'
-        print("✓ Running in Google Colab - checkpoints will be saved to Google Drive")
-    else:
-        # Local machine - save to current directory
-        checkpoint_dir = os.path.join(os.path.dirname(__file__), 'checkpoints')
-        print(f"✓ Running locally - checkpoints will be saved to {checkpoint_dir}")
-    
-    os.makedirs(checkpoint_dir, exist_ok=True)
-    return checkpoint_dir
+def setup_checkpoint_directory():
+    from pathlib import Path
+    try:
+        from google.colab import drive
+        from IPython import get_ipython
+        if get_ipython() is not None:  # Running in Notebook
+            drive.mount('/content/drive')
+            base_path = "/content/drive/MyDrive/FlightDelay_Checkpoints"
+        else:
+            # Running as normal Python script
+            base_path = "./checkpoints"
+    except:
+        # Not in Colab
+        print("✓ Checkpoints will be saved locally.")
+        base_path = "./checkpoints"
+
+    Path(base_path).mkdir(parents=True, exist_ok=True)
+    return base_path 
+
 
 
 # Global checkpoint directory - set at runtime

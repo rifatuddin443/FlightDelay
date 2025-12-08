@@ -16,6 +16,7 @@ import os
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Dict, List, Tuple, Optional
 
 import numpy as np
@@ -25,6 +26,15 @@ from torch import nn
 from torch.func import grad, vmap, functional_call
 from torch.utils.data import Dataset
 from torch_geometric.data import Data
+import glob
+
+# Check if running in Colab for file downloads
+try:
+    from google.colab import files as colab_files
+    IN_COLAB = True
+except ImportError:
+    IN_COLAB = False
+    colab_files = None
 
 # Reuse original implementation
 sys.path.insert(0, os.path.dirname(__file__))
@@ -1192,16 +1202,23 @@ def final_evaluation(
     print("\nDATASET SIZES:")
     print(f"  Train: {train_samples} | Val: {val_samples} | Test: {len(test_x)}")
     
+    # Generate unique filenames with epsilon and timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    eps_str = f"eps{final_epsilon:.2f}".replace(".", "_")
+    
+    history_csv = f"kan_gat_dp_three_stage_history_{eps_str}_{timestamp}.csv"
+    summary_csv = f"kan_gat_dp_three_stage_summary_{eps_str}_{timestamp}.csv"
+    
     # Export history
     if histories:
-        with open("kan_gat_dp_three_stage_history.csv", "w", newline="") as f:
+        with open(history_csv, "w", newline="") as f:
             all_fields = sorted({k for row in histories for k in row})
             writer = csv.DictWriter(f, fieldnames=all_fields)
             writer.writeheader()
             writer.writerows(histories)
     
     # Export summary
-    with open("kan_gat_dp_three_stage_summary.csv", "w", newline="") as f:
+    with open(summary_csv, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(['metric', 'value'])
         summary = {
@@ -1236,8 +1253,39 @@ def final_evaluation(
     
     print(f"\n✓ Results saved to:")
     print(f"  - {model_path}")
-    print(f"  - kan_gat_dp_three_stage_history.csv")
-    print(f"  - kan_gat_dp_three_stage_summary.csv")
+    print(f"  - {history_csv}")
+    print(f"  - {summary_csv}")
+    
+    # Download files to local device (only in Colab)
+    if IN_COLAB and colab_files is not None:
+        print("\n[DOWNLOAD] Downloading files to local device...")
+        
+        # Files to download: model, history, summary, and checkpoints
+        files_to_download = [
+            model_path,
+            history_csv,
+            summary_csv,
+        ]
+        
+        # Add checkpoint files if they exist
+        checkpoint_files = [
+            os.path.join(CHECKPOINT_DIR, 'stage1_checkpoint.pth'),
+            os.path.join(CHECKPOINT_DIR, 'stage2_checkpoint.pth'),
+            os.path.join(CHECKPOINT_DIR, 'stage3_checkpoint.pth'),
+        ]
+        files_to_download.extend(checkpoint_files)
+        
+        for file_path in files_to_download:
+            if os.path.exists(file_path):
+                try:
+                    colab_files.download(file_path)
+                    print(f"  ✓ Downloaded: {file_path}")
+                except Exception as e:
+                    print(f"  ✗ Error downloading {file_path}: {e}")
+            else:
+                print(f"  - File not found: {file_path}")
+    else:
+        print("\n[INFO] Not running in Colab - files saved locally, no download needed.")
 
 
 def save_checkpoint(model, optimizer, epoch, loss, path):
@@ -1422,6 +1470,16 @@ def main() -> None:
     else:
         final_epsilon = float('inf')
         final_delta = 0.0
+    
+    # Generate unique model path with epsilon and timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    eps_str = f"eps{final_epsilon:.2f}".replace(".", "_")
+    
+    # Update model path if using default
+    if args.model_path == 'kan_gat_dp_three_stage.pth':
+        args.model_path = f"kan_gat_dp_three_stage_{eps_str}_{timestamp}.pth"
+    
+    print(f"\nOutput model will be saved to: {args.model_path}")
     
     final_evaluation(
         model, edge_indices, device, scaler, horizons,

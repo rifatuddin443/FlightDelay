@@ -10,6 +10,7 @@ import argparse
 import csv
 import os
 import sys
+from datetime import datetime
 from typing import Dict, List, Tuple
 
 import numpy as np
@@ -581,6 +582,23 @@ def main() -> None:
     print(f"\nLoaded three-stage DP model from: {args.model_path}")
     print(f"Final ε: {final_epsilon:.3f}")
     print(f"Final δ: {final_delta:.2e}")
+    
+    # Generate unique filenames with epsilon and timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    eps_str = f"eps{final_epsilon:.2f}".replace(".", "_")
+    
+    # Update filenames if using defaults
+    if args.summary_csv == "three_stage_test_summary.csv":
+        args.summary_csv = f"three_stage_test_summary_{eps_str}_{timestamp}.csv"
+    if args.predictions_csv == "three_stage_test_predictions.csv":
+        args.predictions_csv = f"three_stage_test_predictions_{eps_str}_{timestamp}.csv"
+    if args.results_table_csv == "results_table.csv":
+        args.results_table_csv = f"results_table_{eps_str}_{timestamp}.csv"
+    
+    print(f"\nOutput files will be:")
+    print(f"  Summary: {args.summary_csv}")
+    print(f"  Results Table: {args.results_table_csv}")
+    print(f"  Predictions: {args.predictions_csv}")
     
     # Evaluate
     (

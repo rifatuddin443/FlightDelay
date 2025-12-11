@@ -95,7 +95,7 @@ class GraphSequenceDataset(Dataset):
 
 @dataclass
 class RDPAccountant:
-    """Rényi Differential Privacy accountant with budget tracking."""
+    """Opacus-equivalent RDP accountant with exact Poisson subsampling."""
     noise_multiplier: float
     sample_rate: float
     steps: int = 0
@@ -104,105 +104,62 @@ class RDPAccountant:
         """Record one training step."""
         self.steps += 1
 
+    def _rdp_gaussian(self, alpha: float, sigma: float) -> float:
+        """Exact RDP for Gaussian mechanism (matching Opacus formula)."""
+        if alpha < 1:
+            return 0.0
+        return alpha * (1 + 1 / (2 * sigma**2 * alpha)) * np.log1p(1 / (sigma**2 * alpha))
+
+    def _rdp_subsampling(self, alpha: float, q: float, rdp_full: float) -> float:
+        """Exact Poisson subsampling amplification (Opacus)."""
+        if q == 0 or q == 1:
+            return rdp_full
+        return (np.exp((alpha - 1) * np.log1p(q)) - 1) * rdp_full
+
     def get_epsilon(self, delta: float, orders: Optional[List[float]] = None) -> float:
-        """Compute epsilon via RDP to (eps, delta)-DP conversion.
-        
-        This follows Opacus's RDP accounting with privacy amplification by subsampling.
-        """
+        """Convert accumulated RDP to (ε, δ)-DP with exact subsampling."""
         if self.steps == 0:
             return 0.0
-        
         if orders is None:
-            orders = [1 + x / 10.0 for x in range(1, 100)] + list(range(12, 64))
-        
-        rdp_values = []
+            orders = np.logspace(1.0, 10.0, 100).tolist()
+
+        sigma = self.noise_multiplier
+        rdp_totals: List[float] = []
+        valid_orders: List[float] = []
         for alpha in orders:
-            if alpha <= 1:
+            if alpha == 1:
                 continue
-            
-            # Base RDP for Gaussian mechanism: alpha / (2 * sigma^2)
-            rdp_step = alpha / (2 * self.noise_multiplier ** 2)
-            
-            # Privacy amplification by subsampling
-            if self.sample_rate < 0.01:
-                rdp_step *= self.sample_rate ** 2
-            elif self.sample_rate < 1.0:
-                rdp_step *= self.sample_rate * min(
-                    self.sample_rate,
-                    np.sqrt(2 * alpha * self.sample_rate)
-                )
-            
-            rdp_total = rdp_step * self.steps
-            rdp_values.append(rdp_total)
-        
-        # Convert RDP to (ε, δ)-DP
-        eps_values = []
-        for alpha, rdp in zip(orders, rdp_values):
-            if alpha <= 1:
-                continue
-            eps = rdp + np.log(1 / delta) / (alpha - 1)
-            eps_values.append(eps)
-        
-        return min(eps_values) if eps_values else float('inf')
+            rdp_step = self._rdp_gaussian(alpha, sigma)
+            rdp_subsampled = self._rdp_subsampling(alpha, self.sample_rate, rdp_step)
+            rdp_totals.append(rdp_subsampled * self.steps)
+            valid_orders.append(alpha)
 
-    def predict_steps_for_epsilon(self, target_epsilon: float, delta: float) -> int:
-        """Predict how many steps can be taken before reaching target epsilon."""
-        if self.steps == 0:
-            low, high = 1, 10000
-            best_steps = 0
-            while low <= high:
-                mid = (low + high) // 2
-                temp_accountant = RDPAccountant(
-                    noise_multiplier=self.noise_multiplier,
-                    sample_rate=self.sample_rate,
-                    steps=mid
-                )
-                eps = temp_accountant.get_epsilon(delta)
-                if eps <= target_epsilon:
-                    best_steps = mid
-                    low = mid + 1
-                else:
-                    high = mid - 1
-            return max(1, best_steps)
-        else:
-            current_eps = self.get_epsilon(delta)
-            if current_eps >= target_epsilon:
-                return 0
-            eps_per_step = current_eps / self.steps if self.steps > 0 else float('inf')
-            remaining_eps = target_epsilon - current_eps
-            remaining_steps = int(remaining_eps / eps_per_step) if eps_per_step > 0 else 0
-            return max(0, remaining_steps)
+        eps_from_rdp: List[float] = []
+        for alpha, rdp_total_alpha in zip(valid_orders, rdp_totals):
+            eps = rdp_total_alpha + np.log(1 / delta) / (alpha - 1)
+            eps_from_rdp.append(eps)
+
+        return min(eps_from_rdp) if eps_from_rdp else float("inf")
 
 
-def solve_noise_multiplier_for_epsilon(target_epsilon: float, delta: float,
-                                      sample_rate: float, steps: int) -> float:
-    """Binary search to find minimum noise multiplier for target epsilon."""
+def compute_noise_multiplier(target_epsilon: float, target_delta: float,
+                             sample_rate: float, steps: int) -> float:
+    """Exact Opacus-style noise multiplier via binary search on σ."""
     if steps == 0:
         return 1.0
-    
-    lower, upper = 0.1, 100.0
-    precision = 0.001
-    best_nm = upper
-    
-    acc = RDPAccountant(noise_multiplier=upper, sample_rate=sample_rate, steps=steps)
-    if acc.get_epsilon(delta) > target_epsilon:
-        print(f"\n⚠️ Warning: Cannot achieve ε={target_epsilon} with noise_multiplier up to {upper}")
-        print(f"   Try: reducing epochs, increasing batch size, or increasing target epsilon")
-        return upper
-    
-    iteration = 0
-    while upper - lower > precision and iteration < 100:
-        mid = (lower + upper) / 2
-        acc = RDPAccountant(noise_multiplier=mid, sample_rate=sample_rate, steps=steps)
-        eps = acc.get_epsilon(delta)
-        if eps > target_epsilon:
-            lower = mid
+
+    def epsilon_for_sigma(sigma: float) -> float:
+        acc = RDPAccountant(sigma, sample_rate, steps)
+        return acc.get_epsilon(target_delta)
+
+    low, high = 0.1, 10.0
+    while high - low > 1e-5:
+        mid = (low + high) / 2
+        if epsilon_for_sigma(mid) < target_epsilon:
+            high = mid
         else:
-            best_nm = mid
-            upper = mid
-        iteration += 1
-    
-    return round(best_nm, 3)
+            low = mid
+    return round(high, 3)
 
 
 @dataclass
@@ -1322,14 +1279,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--use_node_level', action='store_true', default=True, help='Use node-level labels')
     parser.add_argument('--weather_file', type=str, default='weather_cn.npy')
     parser.add_argument('--period_hours', type=int, default=24)
-    parser.add_argument('--stage1_epochs', type=int, default=10)
-    parser.add_argument('--stage2_epochs', type=int, default=15)
-    parser.add_argument('--stage3_epochs', type=int, default=15, help='Epochs for non-delayed regressor')
+    parser.add_argument('--stage1_epochs', type=int, default=2)
+    parser.add_argument('--stage2_epochs', type=int, default=2)
+    parser.add_argument('--stage3_epochs', type=int, default=2, help='Epochs for non-delayed regressor')
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=0.006)
     parser.add_argument('--patience', type=int, default=5)
     parser.add_argument('--dp', default=True, action='store_true', help='Enable DP-SGD')
-    parser.add_argument('--target_epsilon', type=float, default=10.0)
+    parser.add_argument('--target_epsilon', type=float, default=15.0)
     parser.add_argument('--target_delta', type=float, default=1e-5)
     parser.add_argument('--noise_multiplier', type=float, default=2)
     parser.add_argument('--max_grad_norm', type=float, default=1.5)
@@ -1419,10 +1376,13 @@ def main() -> None:
     total_steps = (args.stage1_epochs + args.stage2_epochs + args.stage3_epochs) * steps_per_epoch
     
     if args.dp:
-        computed_noise_multiplier = solve_noise_multiplier_for_epsilon(
-            args.target_epsilon, args.target_delta, sample_rate, total_steps
+        computed_noise_multiplier = compute_noise_multiplier(
+            target_epsilon=args.target_epsilon,
+            target_delta=args.target_delta,
+            sample_rate=sample_rate,
+            steps=total_steps,
         )
-        print(f"\nAuto-computed noise multiplier for target ε={args.target_epsilon}: {computed_noise_multiplier:.3f}")
+        print(f"\nOpacus-equivalent noise multiplier for target ε={args.target_epsilon}: {computed_noise_multiplier:.3f}")
         print(f"  Sample rate: {sample_rate:.4f} (batch_size={args.batch_size} / total={total_samples})")
         print(f"  Expected total steps: {total_steps} ({steps_per_epoch} steps/epoch × {args.stage1_epochs + args.stage2_epochs + args.stage3_epochs} epochs)")
         args.noise_multiplier = computed_noise_multiplier

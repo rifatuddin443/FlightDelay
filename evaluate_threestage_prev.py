@@ -8,10 +8,8 @@ from __future__ import annotations
 
 import argparse
 import csv
-import glob
 import os
 import sys
-from datetime import datetime
 from typing import Dict, List, Tuple
 
 import numpy as np
@@ -323,19 +321,6 @@ def _load_three_stage_model(
     return model, final_epsilon, final_delta
 
 
-def find_latest_model(pattern: str = "kan_gat_dp_three_stage_*.pth") -> str:
-    """Find the most recently created model file matching the pattern."""
-    model_files = glob.glob(pattern)
-    if not model_files:
-        raise FileNotFoundError(
-            f"No model files found matching pattern: {pattern}\n"
-            f"Please train a model first using threestagev2.py or specify --model_path"
-        )
-    # Sort by modification time, newest first
-    latest_model = max(model_files, key=os.path.getmtime)
-    return latest_model
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Test three-stage DP models with separate horizon-wise evaluation.",
@@ -343,8 +328,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model_path",
         type=str,
-        default="kan_gat_dp_three_stage_eps15_01_20251211_151644.pth",
-        help="Path to the three-stage trained checkpoint. Use 'auto' to find the latest kan_gat_dp_three_stage_*.pth file.",
+        default="kan_gat_dp_three_stage_eps5_20_20251209_190223.pth",
+        help="Path to the three-stage trained checkpoint",
     )
     parser.add_argument("--data_source", type=str, default="udata", choices=["cdata", "udata"])
     parser.add_argument("--seq_len", type=int, default=8)
@@ -584,11 +569,6 @@ def main() -> None:
         edge_index_od_t.to(device),
     )
     
-    # Auto-detect model path if set to 'auto'
-    if args.model_path == "auto":
-        args.model_path = find_latest_model()
-        print(f"Auto-detected latest model: {args.model_path}")
-    
     # Load model with DP metadata
     model, final_epsilon, final_delta = _load_three_stage_model(
         args.model_path,
@@ -601,23 +581,6 @@ def main() -> None:
     print(f"\nLoaded three-stage DP model from: {args.model_path}")
     print(f"Final ε: {final_epsilon:.3f}")
     print(f"Final δ: {final_delta:.2e}")
-    
-    # Generate unique filenames with epsilon and timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    eps_str = f"eps{final_epsilon:.2f}".replace(".", "_")
-    
-    # Update filenames if using defaults
-    if args.summary_csv == "three_stage_test_summary.csv":
-        args.summary_csv = f"three_stage_test_summary_{eps_str}_{timestamp}.csv"
-    if args.predictions_csv == "three_stage_test_predictions.csv":
-        args.predictions_csv = f"three_stage_test_predictions_{eps_str}_{timestamp}.csv"
-    if args.results_table_csv == "results_table.csv":
-        args.results_table_csv = f"results_table_{eps_str}_{timestamp}.csv"
-    
-    print(f"\nOutput files will be:")
-    print(f"  Summary: {args.summary_csv}")
-    print(f"  Results Table: {args.results_table_csv}")
-    print(f"  Predictions: {args.predictions_csv}")
     
     # Evaluate
     (

@@ -105,6 +105,7 @@ class LightweightGATEncoder(nn.Module):
             grid_size=3,
             spline_order=2,
         )
+        self.dropout = nn.Dropout(0.3)  # Add dropout for regularization
 
     def forward(self, data: Data) -> torch.Tensor:
         weights = F.softmax(torch.stack([self.alpha_adj, self.alpha_od, self.alpha_od_t]), dim=0)
@@ -123,6 +124,7 @@ class LightweightGATEncoder(nn.Module):
 
         x_concat = torch.cat([x_adj, x_od, x_od_t, scalars], dim=1)
         fused = F.relu(self.fusion_kan(x_concat))
+        fused = self.dropout(fused)  # Apply dropout
         return fused
 
     def get_graph_weights(self) -> Dict[str, float]:
@@ -132,6 +134,99 @@ class LightweightGATEncoder(nn.Module):
             'od_weight': weights[1].item(),
             'od_t_weight': weights[2].item(),
         }
+
+
+class AttentionFusionGATEncoder(nn.Module):
+    """Multi-view GAT encoder with attention-based fusion."""
+
+    def __init__(self, in_channels: int, hidden_channels: int = 64, heads: int = 4):
+        super().__init__()
+        self.gat_adj = GATConv(in_channels, hidden_channels, heads=heads, concat=False, dropout=0.2)
+        self.gat_od = GATConv(in_channels, hidden_channels, heads=heads, concat=False, dropout=0.2)
+        self.gat_od_t = GATConv(in_channels, hidden_channels, heads=heads, concat=False, dropout=0.2)
+
+        self.attn = nn.MultiheadAttention(
+            embed_dim=hidden_channels,
+            num_heads=min(4, heads * 2),
+            dropout=0.1,
+            batch_first=True,
+        )
+        self.ln_attn = nn.LayerNorm(hidden_channels)
+
+        self.ffn = nn.Sequential(
+            nn.Linear(hidden_channels, hidden_channels * 2),
+            nn.ELU(),
+            nn.Dropout(0.1),
+            nn.Linear(hidden_channels * 2, hidden_channels),
+        )
+        self.ln_ffn = nn.LayerNorm(hidden_channels)
+        self.dropout = nn.Dropout(0.3)
+
+    def forward(self, data: Data) -> torch.Tensor:
+        x_adj = F.elu(self.gat_adj(data.x, data.edge_index_adj))
+        x_od = F.elu(self.gat_od(data.x, data.edge_index_od))
+        x_od_t = F.elu(self.gat_od_t(data.x, data.edge_index_od_t))
+
+        x_stack = torch.stack([x_adj, x_od, x_od_t], dim=1)  # [num_nodes, 3, hidden]
+        attn_out, _ = self.attn(x_stack, x_stack, x_stack)
+        fused = self.ln_attn(attn_out.mean(dim=1))
+
+        ffn_out = self.ffn(fused)
+        fused = self.ln_ffn(fused + ffn_out)
+        return self.dropout(fused)
+
+
+class ResidualKANHead(nn.Module):
+    """Residual fully connected head with dimension reduction."""
+
+    def __init__(self, hidden_channels: int, out_dim: int, dropout: float = 0.2):
+        super().__init__()
+        mid_channels = max(hidden_channels // 2, 1)
+        self.block1 = nn.Sequential(
+            nn.Linear(hidden_channels, hidden_channels),
+            nn.BatchNorm1d(hidden_channels),
+            nn.ELU(),
+            nn.Dropout(dropout),
+        )
+        self.block2 = nn.Sequential(
+            nn.Linear(hidden_channels, mid_channels),
+            nn.BatchNorm1d(mid_channels),
+            nn.ELU(),
+            nn.Dropout(dropout),
+        )
+        self.residual_proj = nn.Linear(hidden_channels, mid_channels)
+        self.head = nn.Linear(mid_channels, out_dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out = self.block1(x)
+        out = out + x  # first residual keeps dimension
+        out2 = self.block2(out)
+        out2 = out2 + self.residual_proj(x)
+        return self.head(out2)
+
+
+class ResidualKANPredictor(nn.Module):
+    """Encoder with residual classifier/regressor heads."""
+
+    def __init__(self, in_channels: int, out_channels: int, hidden_channels: int = 64):
+        super().__init__()
+        self.encoder = AttentionFusionGATEncoder(in_channels, hidden_channels)
+        self.classifier = ResidualKANHead(hidden_channels, 1, dropout=0.2)
+        self.regressor = ResidualKANHead(hidden_channels, out_channels, dropout=0.2)
+
+    def forward_classifier(self, data: Data) -> Tuple[torch.Tensor, torch.Tensor]:
+        hidden = self.encoder(data)
+        logits = self.classifier(hidden)
+        return hidden, logits
+
+    def forward_regressor(self, hidden: torch.Tensor) -> torch.Tensor:
+        return self.regressor(hidden)
+
+    def forward(self, data: Data) -> Tuple[torch.Tensor, torch.Tensor]:
+        hidden = self.encoder(data)
+        logits = self.classifier(hidden)
+        reg_out = self.regressor(hidden)
+        return logits, reg_out
 
 
 class SequentialTwoStagePredictor(nn.Module):
@@ -152,22 +247,27 @@ class SequentialTwoStagePredictor(nn.Module):
             grid_size=3,
             spline_order=2,
         )
+        # Add dropout for classifier and regressor
+        self.dropout_cls = nn.Dropout(0.2)
+        self.dropout_reg = nn.Dropout(0.2)
 
     def forward_classifier(self, data: Data) -> Tuple[torch.Tensor, torch.Tensor]:
         """Stage 1: Return embeddings and classification logits."""
         hidden = self.encoder(data)
-        logits = self.classifier(hidden)
+        hidden_dropped = self.dropout_cls(hidden)
+        logits = self.classifier(hidden_dropped)
         return hidden, logits
 
     def forward_regressor(self, hidden: torch.Tensor) -> torch.Tensor:
         """Stage 2: Regress on precomputed embeddings."""
-        return self.regressor(hidden)
+        hidden_dropped = self.dropout_reg(hidden)
+        return self.regressor(hidden_dropped)
 
     def forward(self, data: Data) -> Tuple[torch.Tensor, torch.Tensor]:
         """Full forward pass for inference."""
         hidden = self.encoder(data)
-        logits = self.classifier(hidden)
-        reg_out = self.regressor(hidden)
+        logits = self.classifier(self.dropout_cls(hidden))
+        reg_out = self.regressor(self.dropout_reg(hidden))
         return logits, reg_out
 
 

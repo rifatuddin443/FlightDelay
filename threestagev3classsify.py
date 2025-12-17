@@ -40,7 +40,7 @@ except ImportError:
 sys.path.insert(0, os.path.dirname(__file__))
 from classifykat import (  # noqa: E402
     EarlyStopping,
-    SequentialTwoStagePredictor,
+    ResidualKANPredictor,
     build_sequences,
     classification_metrics,
     load_flight_data,
@@ -153,7 +153,7 @@ def compute_noise_multiplier(target_epsilon: float, target_delta: float,
         return acc.get_epsilon(target_delta)
 
     low, high = 0.1, 10.0
-    while high - low > 1e-5:
+    while high - low > 1e-5:    
         mid = (low + high) / 2
         if epsilon_for_sigma(mid) < target_epsilon:
             high = mid
@@ -172,6 +172,24 @@ class DPConfig:
     max_grad_norm: float
     sample_rate: float
     epsilon_tolerance: float = 0.05
+
+
+class FocalLoss(nn.Module):
+    """Focal Loss for addressing class imbalance.
+    
+    Better than weighted BCE for highly imbalanced datasets.
+    Reduces loss for well-classified examples, focusing on hard negatives.
+    """
+    def __init__(self, alpha: float = 0.25, gamma: float = 2.0):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+    
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        bce_loss = F.binary_cross_entropy_with_logits(logits, targets, reduction='none')
+        pt = torch.exp(-bce_loss)  # Probability of correct class
+        focal_loss = self.alpha * (1 - pt) ** self.gamma * bce_loss
+        return focal_loss.mean()
 
 
 class PerSampleGradientClipper:
@@ -277,7 +295,7 @@ def ensure_graph_level_target(target: torch.Tensor) -> torch.Tensor:
 
 
 def train_stage1_with_dp(
-    model: SequentialTwoStagePredictor,
+    model: nn.Module,
     train_x: torch.Tensor,
     train_y_cls: torch.Tensor,
     val_x: torch.Tensor,
@@ -304,9 +322,9 @@ def train_stage1_with_dp(
     
     trainable_params = list(model.encoder.parameters()) + list(model.classifier.parameters())
     optimizer = torch.optim.Adam(trainable_params, lr=lr, weight_decay=1e-4)
-    cls_loss_fn = nn.BCEWithLogitsLoss(
-        pos_weight=torch.tensor([pos_weight], device=device)
-    )
+    
+    # Use Focal Loss for better class imbalance handling
+    cls_loss_fn = FocalLoss(alpha=0.25, gamma=2.0)
     
     accountant = RDPAccountant(
         noise_multiplier=dp_config.noise_multiplier,
@@ -494,7 +512,7 @@ def train_stage1_with_dp(
 
 
 def train_stage2_with_dp(
-    model: SequentialTwoStagePredictor,
+    model: nn.Module,
     train_x: torch.Tensor,
     train_y_reg: torch.Tensor,
     train_y_cls: torch.Tensor,
@@ -724,7 +742,7 @@ def train_stage2_with_dp(
 
 
 def train_stage3_with_dp(
-    model: SequentialTwoStagePredictor,
+    model: nn.Module,
     train_x: torch.Tensor,
     train_y_reg: torch.Tensor,
     train_y_cls: torch.Tensor,
@@ -998,7 +1016,7 @@ def train_stage3_with_dp(
     return history, accountant, stage_time
 
 def final_evaluation(
-    model: SequentialTwoStagePredictor,
+    model: nn.Module,
     edge_indices: Tuple,
     device: torch.device,
     scaler,
@@ -1364,10 +1382,10 @@ def main() -> None:
         edge_index_od_t.to(device),
     )
     
-    model = SequentialTwoStagePredictor(
+    model = ResidualKANPredictor(
         in_channels=in_channels,
         out_channels=out_channels,
-        hidden_channels=32,
+        hidden_channels=64,
     ).to(device)
     
     total_samples = len(train_x)

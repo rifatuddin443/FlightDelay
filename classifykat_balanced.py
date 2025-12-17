@@ -144,7 +144,7 @@ def build_sequences_node_level(
     # Print actual balance
     cls_tensor = tensors[2]
     delayed_rate = cls_tensor.mean().item()
-    print(f"\n📊 Node-level balance: {delayed_rate:.2%} delayed (should be ~22%)")
+    print(f"\nNode-level balance: {delayed_rate:.2%} delayed (should be ~22%)")
     
     return tensors
 

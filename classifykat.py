@@ -136,44 +136,7 @@ class LightweightGATEncoder(nn.Module):
         }
 
 
-class AttentionFusionGATEncoder(nn.Module):
-    """Multi-view GAT encoder with attention-based fusion."""
-
-    def __init__(self, in_channels: int, hidden_channels: int = 64, heads: int = 4):
-        super().__init__()
-        self.gat_adj = GATConv(in_channels, hidden_channels, heads=heads, concat=False, dropout=0.2)
-        self.gat_od = GATConv(in_channels, hidden_channels, heads=heads, concat=False, dropout=0.2)
-        self.gat_od_t = GATConv(in_channels, hidden_channels, heads=heads, concat=False, dropout=0.2)
-
-        self.attn = nn.MultiheadAttention(
-            embed_dim=hidden_channels,
-            num_heads=min(4, heads * 2),
-            dropout=0.1,
-            batch_first=True,
-        )
-        self.ln_attn = nn.LayerNorm(hidden_channels)
-
-        self.ffn = nn.Sequential(
-            nn.Linear(hidden_channels, hidden_channels * 2),
-            nn.ELU(),
-            nn.Dropout(0.1),
-            nn.Linear(hidden_channels * 2, hidden_channels),
-        )
-        self.ln_ffn = nn.LayerNorm(hidden_channels)
-        self.dropout = nn.Dropout(0.3)
-
-    def forward(self, data: Data) -> torch.Tensor:
-        x_adj = F.elu(self.gat_adj(data.x, data.edge_index_adj))
-        x_od = F.elu(self.gat_od(data.x, data.edge_index_od))
-        x_od_t = F.elu(self.gat_od_t(data.x, data.edge_index_od_t))
-
-        x_stack = torch.stack([x_adj, x_od, x_od_t], dim=1)  # [num_nodes, 3, hidden]
-        attn_out, _ = self.attn(x_stack, x_stack, x_stack)
-        fused = self.ln_attn(attn_out.mean(dim=1))
-
-        ffn_out = self.ffn(fused)
-        fused = self.ln_ffn(fused + ffn_out)
-        return self.dropout(fused)
+# AttentionFusionGATEncoder removed — use LightweightGATEncoder instead.
 
 
 class ResidualKANHead(nn.Module):
@@ -210,7 +173,8 @@ class ResidualKANPredictor(nn.Module):
 
     def __init__(self, in_channels: int, out_channels: int, hidden_channels: int = 64):
         super().__init__()
-        self.encoder = AttentionFusionGATEncoder(in_channels, hidden_channels)
+        # Use the lightweight GAT encoder by default (Attention encoder removed)
+        self.encoder = LightweightGATEncoder(in_channels, hidden_channels)
         self.classifier = ResidualKANHead(hidden_channels, 1, dropout=0.2)
         self.regressor = ResidualKANHead(hidden_channels, out_channels, dropout=0.2)
 

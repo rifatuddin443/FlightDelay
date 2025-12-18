@@ -1,27 +1,27 @@
-"""Test script for three-stage DP models with horizon-wise evaluation.
+"""Test script for three-stage DP models with ResidualKANPredictor architecture.
 
-Tests a model trained with train_stage3 which continues training the SAME regressor
-on non-delayed flights after training on delayed flights in stage 2.
+Tests models trained with threestagev3classify.py which use the ResidualKANPredictor
+architecture with separate encoder, classifier, and regressor components.
 """
 
 from __future__ import annotations
-
 import argparse
 import csv
 import glob
 import os
 import sys
+import time
 from datetime import datetime
 from typing import Dict, List, Tuple
-
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch_geometric.data import Data
 
 # Reuse shared utilities
 sys.path.insert(0, os.path.dirname(__file__))
 from classifykat import (  # noqa: E402
-    SequentialTwoStagePredictor,
+    ResidualKANPredictor,
     build_sequences,
     classification_metrics,
     load_flight_data,
@@ -46,7 +46,7 @@ def ensure_graph_level_target(target: torch.Tensor) -> torch.Tensor:
 
 
 def _evaluate_three_stage_per_horizon(
-    model: SequentialTwoStagePredictor,
+    model: ResidualKANPredictor,
     edge_indices: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
     device: torch.device,
     scaler,
@@ -65,10 +65,7 @@ def _evaluate_three_stage_per_horizon(
     np.ndarray,
     np.ndarray,
 ]:
-    """Evaluate three-stage model with separate metrics per horizon for delayed/non-delayed.
-    
-    Since the model uses classifier gating, predictions for delayed flights come through
-    the classifier gate, while non-delayed flights get zero predictions.
+    """Evaluate three-stage ResidualKANPredictor model with separate metrics per horizon.
     
     Returns:
         - Classification metrics
@@ -94,8 +91,13 @@ def _evaluate_three_stage_per_horizon(
                 edge_index_od_t=edge_index_od_t,
             )
             
-            # Get predictions (classifier + regressor)
-            node_logits, node_reg = model(data)
+            # Get predictions using ResidualKANPredictor architecture
+            # encoder -> classifier + regressor
+            node_encoded = model.encoder(data)
+            node_logits = model.classifier(node_encoded)
+            node_reg = model.regressor(node_encoded)
+            
+            # Aggregate to graph-level
             graph_logit = aggregate_node_to_graph(node_logits)
             graph_reg = aggregate_node_to_graph(node_reg)
             
@@ -195,7 +197,6 @@ def _evaluate_three_stage_per_horizon(
             }
     
     # Per-horizon metrics for NON-DELAYED flights (<5 min)
-    # These should be very small due to Stage 3 training
     per_horizon_nondelayed_metrics: Dict[int, Dict[str, float]] = {}
     for idx, horizon in enumerate(horizons):
         if true_nondelayed_mask.sum() > 0:
@@ -288,18 +289,18 @@ def _evaluate_three_stage_per_horizon(
     )
 
 
-def _load_three_stage_model(
+def _load_residual_kan_model(
     model_path: str,
     in_channels: int,
     out_channels: int,
     hidden_channels: int,
     device: torch.device,
-) -> Tuple[SequentialTwoStagePredictor, float, float]:
-    """Load three-stage model and extract DP metadata."""
+) -> Tuple[ResidualKANPredictor, float, float]:
+    """Load ResidualKANPredictor model and extract DP metadata."""
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Checkpoint not found: {model_path}")
     
-    model = SequentialTwoStagePredictor(
+    model = ResidualKANPredictor(
         in_channels=in_channels,
         out_channels=out_channels,
         hidden_channels=hidden_channels,
@@ -312,7 +313,7 @@ def _load_three_stage_model(
         model.encoder.load_state_dict(checkpoint["encoder"])
         model.classifier.load_state_dict(checkpoint["classifier"])
         model.regressor.load_state_dict(checkpoint["regressor"])
-        print("✓ Loaded three-stage trained model (regressor trained on both delayed and non-delayed)")
+        print("✓ Loaded three-stage trained ResidualKANPredictor model")
     else:
         model.load_state_dict(checkpoint)
     
@@ -329,7 +330,7 @@ def find_latest_model(pattern: str = "kan_gat_dp_three_stage_*.pth") -> str:
     if not model_files:
         raise FileNotFoundError(
             f"No model files found matching pattern: {pattern}\n"
-            f"Please train a model first using threestagev2.py or specify --model_path"
+            f"Please train a model first using threestagev3classify.py or specify --model_path"
         )
     # Sort by modification time, newest first
     latest_model = max(model_files, key=os.path.getmtime)
@@ -338,7 +339,7 @@ def find_latest_model(pattern: str = "kan_gat_dp_three_stage_*.pth") -> str:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Test three-stage DP models with separate horizon-wise evaluation.",
+        description="Test three-stage DP models with ResidualKANPredictor architecture.",
     )
     parser.add_argument(
         "--model_path",
@@ -354,10 +355,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--use_node_level", action="store_true", default=True, help="Use node-level labels")
     parser.add_argument("--weather_file", type=str, default="weather_cn.npy")
     parser.add_argument("--period_hours", type=int, default=24)
-    parser.add_argument("--hidden_channels", type=int, default=32)
-    parser.add_argument("--summary_csv", type=str, default="three_stage_test_summary.csv")
-    parser.add_argument("--predictions_csv", type=str, default="three_stage_test_predictions.csv")
-    parser.add_argument("--results_table_csv", type=str, default="results_table.csv")
+    parser.add_argument("--hidden_channels", type=int, default=64)
+    parser.add_argument("--summary_csv", type=str, default="residual_kan_test_summary.csv")
+    parser.add_argument("--predictions_csv", type=str, default="residual_kan_test_predictions.csv")
+    parser.add_argument("--results_table_csv", type=str, default="residual_kan_results_table.csv")
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
@@ -381,14 +382,14 @@ def save_results_table(
         
         # Header section
         writer.writerow(["=" * 80])
-        writer.writerow(["COMPREHENSIVE EVALUATION RESULTS"])
+        writer.writerow(["COMPREHENSIVE EVALUATION RESULTS - ResidualKANPredictor"])
         writer.writerow(["=" * 80])
         writer.writerow([])
         
         # Model and configuration info
         writer.writerow(["MODEL INFORMATION"])
         writer.writerow(["Model Path", model_path])
-        writer.writerow(["Model Type", "Three-Stage DP"])
+        writer.writerow(["Model Type", "Three-Stage DP (ResidualKANPredictor)"])
         writer.writerow(["Data Source", args.data_source])
         writer.writerow(["Sequence Length", args.seq_len])
         writer.writerow(["Delay Threshold", f"{args.delay_threshold} min"])
@@ -408,7 +409,7 @@ def save_results_table(
         writer.writerow(["Accuracy", f"{cls_metrics['accuracy']:.4f}"])
         writer.writerow([])
         
-        # Overall summary table (the main table you wanted)
+        # Overall summary table
         writer.writerow(["=" * 80])
         writer.writerow(["OVERALL SUMMARY TABLE"])
         writer.writerow(["=" * 80])
@@ -590,7 +591,7 @@ def main() -> None:
         print(f"Auto-detected latest model: {args.model_path}")
     
     # Load model with DP metadata
-    model, final_epsilon, final_delta = _load_three_stage_model(
+    model, final_epsilon, final_delta = _load_residual_kan_model(
         args.model_path,
         in_channels=in_channels,
         out_channels=out_channels,
@@ -598,7 +599,7 @@ def main() -> None:
         device=device,
     )
     
-    print(f"\nLoaded three-stage DP model from: {args.model_path}")
+    print(f"\nLoaded ResidualKANPredictor three-stage DP model from: {args.model_path}")
     print(f"Final ε: {final_epsilon:.3f}")
     print(f"Final δ: {final_delta:.2e}")
     
@@ -607,12 +608,12 @@ def main() -> None:
     eps_str = f"eps{final_epsilon:.2f}".replace(".", "_")
     
     # Update filenames if using defaults
-    if args.summary_csv == "three_stage_test_summary.csv":
-        args.summary_csv = f"three_stage_test_summary_{eps_str}_{timestamp}.csv"
-    if args.predictions_csv == "three_stage_test_predictions.csv":
-        args.predictions_csv = f"three_stage_test_predictions_{eps_str}_{timestamp}.csv"
-    if args.results_table_csv == "results_table.csv":
-        args.results_table_csv = f"results_table_{eps_str}_{timestamp}.csv"
+    if args.summary_csv == "residual_kan_test_summary.csv":
+        args.summary_csv = f"residual_kan_test_summary_{eps_str}_{timestamp}.csv"
+    if args.predictions_csv == "residual_kan_test_predictions.csv":
+        args.predictions_csv = f"residual_kan_test_predictions_{eps_str}_{timestamp}.csv"
+    if args.results_table_csv == "residual_kan_results_table.csv":
+        args.results_table_csv = f"residual_kan_results_table_{eps_str}_{timestamp}.csv"
     
     print(f"\nOutput files will be:")
     print(f"  Summary: {args.summary_csv}")
@@ -643,7 +644,7 @@ def main() -> None:
     
     # Print results
     print("\n" + "="*80)
-    print("TEST RESULTS - THREE-STAGE MODEL")
+    print("TEST RESULTS - ResidualKANPredictor THREE-STAGE MODEL")
     print("="*80)
     
     print("\nCLASSIFICATION METRICS:")
@@ -706,7 +707,7 @@ def main() -> None:
             writer.writerow(["final_epsilon", final_epsilon])
             writer.writerow(["final_delta", final_delta])
             writer.writerow(["model_path", args.model_path])
-            writer.writerow(["model_type", "three_stage"])
+            writer.writerow(["model_type", "three_stage_residual_kan"])
             writer.writerow(["data_source", args.data_source])
             writer.writerow(["seq_len", args.seq_len])
             writer.writerow(["delay_threshold", args.delay_threshold])
@@ -725,10 +726,6 @@ def main() -> None:
                 writer.writerow([f"delayed_h{horizon}_departure_mae", metrics["departure_mae"]])
                 writer.writerow([f"delayed_h{horizon}_departure_rmse", metrics["departure_rmse"]])
                 writer.writerow([f"delayed_h{horizon}_departure_r2", metrics["departure_r2"]])
-                writer.writerow([f"delayed_h{horizon}_mean_arrival_pred", metrics["mean_arrival_pred"]])
-                writer.writerow([f"delayed_h{horizon}_mean_arrival_target", metrics["mean_arrival_target"]])
-                writer.writerow([f"delayed_h{horizon}_mean_departure_pred", metrics["mean_departure_pred"]])
-                writer.writerow([f"delayed_h{horizon}_mean_departure_target", metrics["mean_departure_target"]])
             
             # Per-horizon metrics for NON-DELAYED flights
             for horizon, metrics in per_horizon_nondelayed_metrics.items():
@@ -739,10 +736,6 @@ def main() -> None:
                 writer.writerow([f"nondelayed_h{horizon}_departure_mae", metrics["departure_mae"]])
                 writer.writerow([f"nondelayed_h{horizon}_departure_rmse", metrics["departure_rmse"]])
                 writer.writerow([f"nondelayed_h{horizon}_departure_r2", metrics["departure_r2"]])
-                writer.writerow([f"nondelayed_h{horizon}_mean_arrival_pred", metrics["mean_arrival_pred"]])
-                writer.writerow([f"nondelayed_h{horizon}_mean_arrival_target", metrics["mean_arrival_target"]])
-                writer.writerow([f"nondelayed_h{horizon}_mean_departure_pred", metrics["mean_departure_pred"]])
-                writer.writerow([f"nondelayed_h{horizon}_mean_departure_target", metrics["mean_departure_target"]])
             
             # Per-horizon metrics for OVERALL
             for horizon, metrics in per_horizon_overall_metrics.items():
@@ -753,10 +746,6 @@ def main() -> None:
                 writer.writerow([f"overall_h{horizon}_departure_mae", metrics["departure_mae"]])
                 writer.writerow([f"overall_h{horizon}_departure_rmse", metrics["departure_rmse"]])
                 writer.writerow([f"overall_h{horizon}_departure_r2", metrics["departure_r2"]])
-                writer.writerow([f"overall_h{horizon}_mean_arrival_pred", metrics["mean_arrival_pred"]])
-                writer.writerow([f"overall_h{horizon}_mean_arrival_target", metrics["mean_arrival_target"]])
-                writer.writerow([f"overall_h{horizon}_mean_departure_pred", metrics["mean_departure_pred"]])
-                writer.writerow([f"overall_h{horizon}_mean_departure_target", metrics["mean_departure_target"]])
         
         print(f"\n✓ Summary saved to: {args.summary_csv}")
     
@@ -800,24 +789,17 @@ def main() -> None:
             
             for idx in range(num_samples):
                 for h_idx, horizon in enumerate(horizons):
-                    arrival_pred = preds_h[idx, h_idx, 0]
-                    arrival_target = targets_h[idx, h_idx, 0]
-                    departure_pred = preds_h[idx, h_idx, 1]
-                    departure_target = targets_h[idx, h_idx, 1]
-                    
-                    writer.writerow(
-                        {
-                            "sample_index": idx,
-                            "horizon": horizon,
-                            "is_delayed_ground_truth": int(is_delayed[idx]),
-                            "arrival_pred": arrival_pred,
-                            "arrival_target": arrival_target,
-                            "departure_pred": departure_pred,
-                            "departure_target": departure_target,
-                            "epsilon": final_epsilon,
-                            "delta": final_delta,
-                        }
-                    )
+                    writer.writerow({
+                        "sample_index": idx,
+                        "horizon": horizon,
+                        "is_delayed_ground_truth": int(is_delayed[idx]),
+                        "arrival_pred": preds_h[idx, h_idx, 0],
+                        "arrival_target": targets_h[idx, h_idx, 0],
+                        "departure_pred": preds_h[idx, h_idx, 1],
+                        "departure_target": targets_h[idx, h_idx, 1],
+                        "epsilon": final_epsilon,
+                        "delta": final_delta,
+                    })
         
         print(f"✓ Predictions saved to: {args.predictions_csv}")
 

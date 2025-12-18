@@ -2,7 +2,7 @@
 
 FIXED:
 1. Ensures both predictions AND targets are at graph-level (not node-level).
-2. Automatically computes noise multiplier to achieve target epsilon.
+2. Uses fixed noise multiplier for differential privacy (not auto-computed).
 3. Allows training to complete all epochs while tracking epsilon.
 4. NEW: Added Stage 3 for regressing delays on samples predicted as under threshold.
 5. FIXED: Stage 3 now correctly masks based on actual delay values (< 5 min), not classification labels.
@@ -40,7 +40,7 @@ except ImportError:
 sys.path.insert(0, os.path.dirname(__file__))
 from classifykat import (  # noqa: E402
     EarlyStopping,
-    ResidualKANPredictor,
+    SequentialTwoStagePredictor,
     build_sequences,
     classification_metrics,
     load_flight_data,
@@ -153,7 +153,7 @@ def compute_noise_multiplier(target_epsilon: float, target_delta: float,
         return acc.get_epsilon(target_delta)
 
     low, high = 0.1, 10.0
-    while high - low > 1e-5:    
+    while high - low > 1e-5:
         mid = (low + high) / 2
         if epsilon_for_sigma(mid) < target_epsilon:
             high = mid
@@ -172,24 +172,6 @@ class DPConfig:
     max_grad_norm: float
     sample_rate: float
     epsilon_tolerance: float = 0.05
-
-
-class FocalLoss(nn.Module):
-    """Focal Loss for addressing class imbalance.
-    
-    Better than weighted BCE for highly imbalanced datasets.
-    Reduces loss for well-classified examples, focusing on hard negatives.
-    """
-    def __init__(self, alpha: float = 0.25, gamma: float = 2.0):
-        super().__init__()
-        self.alpha = alpha
-        self.gamma = gamma
-    
-    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        bce_loss = F.binary_cross_entropy_with_logits(logits, targets, reduction='none')
-        pt = torch.exp(-bce_loss)  # Probability of correct class
-        focal_loss = self.alpha * (1 - pt) ** self.gamma * bce_loss
-        return focal_loss.mean()
 
 
 class PerSampleGradientClipper:
@@ -295,7 +277,7 @@ def ensure_graph_level_target(target: torch.Tensor) -> torch.Tensor:
 
 
 def train_stage1_with_dp(
-    model: nn.Module,
+    model: SequentialTwoStagePredictor,
     train_x: torch.Tensor,
     train_y_cls: torch.Tensor,
     val_x: torch.Tensor,
@@ -322,9 +304,9 @@ def train_stage1_with_dp(
     
     trainable_params = list(model.encoder.parameters()) + list(model.classifier.parameters())
     optimizer = torch.optim.Adam(trainable_params, lr=lr, weight_decay=1e-4)
-    
-    # Use Focal Loss for better class imbalance handling
-    cls_loss_fn = FocalLoss(alpha=0.25, gamma=2.0)
+    cls_loss_fn = nn.BCEWithLogitsLoss(
+        pos_weight=torch.tensor([pos_weight], device=device)
+    )
     
     accountant = RDPAccountant(
         noise_multiplier=dp_config.noise_multiplier,
@@ -512,7 +494,7 @@ def train_stage1_with_dp(
 
 
 def train_stage2_with_dp(
-    model: nn.Module,
+    model: SequentialTwoStagePredictor,
     train_x: torch.Tensor,
     train_y_reg: torch.Tensor,
     train_y_cls: torch.Tensor,
@@ -742,7 +724,7 @@ def train_stage2_with_dp(
 
 
 def train_stage3_with_dp(
-    model: nn.Module,
+    model: SequentialTwoStagePredictor,
     train_x: torch.Tensor,
     train_y_reg: torch.Tensor,
     train_y_cls: torch.Tensor,
@@ -1016,7 +998,7 @@ def train_stage3_with_dp(
     return history, accountant, stage_time
 
 def final_evaluation(
-    model: nn.Module,
+    model: SequentialTwoStagePredictor,
     edge_indices: Tuple,
     device: torch.device,
     scaler,
@@ -1177,12 +1159,12 @@ def final_evaluation(
     print("\nDATASET SIZES:")
     print(f"  Train: {train_samples} | Val: {val_samples} | Test: {len(test_x)}")
     
-    # Generate unique filenames with epsilon and timestamp
+    # Generate unique filenames with noise multiplier (sigma) and timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    eps_str = f"eps{final_epsilon:.2f}".replace(".", "_")
+    sigma_str = f"sigma{dp_config.noise_multiplier:.2f}".replace(".", "_")
     
-    history_csv = f"kan_gat_dp_three_stage_history_{eps_str}_{timestamp}.csv"
-    summary_csv = f"kan_gat_dp_three_stage_summary_{eps_str}_{timestamp}.csv"
+    history_csv = f"kan_gat_dp_three_stage_history_{sigma_str}_{timestamp}.csv"
+    summary_csv = f"kan_gat_dp_three_stage_summary_{sigma_str}_{timestamp}.csv"
     
     # Export history
     if histories:
@@ -1297,16 +1279,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--use_node_level', action='store_true', default=True, help='Use node-level labels')
     parser.add_argument('--weather_file', type=str, default='weather_cn.npy')
     parser.add_argument('--period_hours', type=int, default=24)
-    parser.add_argument('--stage1_epochs', type=int, default=7)
-    parser.add_argument('--stage2_epochs', type=int, default=10)
-    parser.add_argument('--stage3_epochs', type=int, default=10, help='Epochs for non-delayed regressor')
+    parser.add_argument('--stage1_epochs', type=int, default=2)
+    parser.add_argument('--stage2_epochs', type=int, default=2)
+    parser.add_argument('--stage3_epochs', type=int, default=2, help='Epochs for non-delayed regressor')
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--patience', type=int, default=5)
     parser.add_argument('--dp', default=True, action='store_true', help='Enable DP-SGD')
-    parser.add_argument('--target_epsilon', type=float, default=10.0)
+    parser.add_argument('--target_epsilon', type=float, default=15.0, help='Target epsilon for tracking (not used for computing noise)')
     parser.add_argument('--target_delta', type=float, default=1e-5)
-    parser.add_argument('--noise_multiplier', type=float, default=2)
+    parser.add_argument('--noise_multiplier', type=float, default=2.0, help='Fixed noise multiplier for DP-SGD (not auto-computed)')
     parser.add_argument('--max_grad_norm', type=float, default=1.5)
     parser.add_argument('--sample_rate', type=float, default=0.02)
     parser.add_argument('--epsilon_tolerance', type=float, default=0.05)
@@ -1382,10 +1364,10 @@ def main() -> None:
         edge_index_od_t.to(device),
     )
     
-    model = ResidualKANPredictor(
+    model = SequentialTwoStagePredictor(
         in_channels=in_channels,
         out_channels=out_channels,
-        hidden_channels=64,
+        hidden_channels=32,
     ).to(device)
     
     total_samples = len(train_x)
@@ -1394,16 +1376,10 @@ def main() -> None:
     total_steps = (args.stage1_epochs + args.stage2_epochs + args.stage3_epochs) * steps_per_epoch
     
     if args.dp:
-        computed_noise_multiplier = compute_noise_multiplier(
-            target_epsilon=args.target_epsilon,
-            target_delta=args.target_delta,
-            sample_rate=sample_rate,
-            steps=total_steps,
-        )
-        print(f"\nOpacus-equivalent noise multiplier for target ε={args.target_epsilon}: {computed_noise_multiplier:.3f}")
+        print(f"\nUsing FIXED noise multiplier: {args.noise_multiplier:.3f}")
         print(f"  Sample rate: {sample_rate:.4f} (batch_size={args.batch_size} / total={total_samples})")
         print(f"  Expected total steps: {total_steps} ({steps_per_epoch} steps/epoch × {args.stage1_epochs + args.stage2_epochs + args.stage3_epochs} epochs)")
-        args.noise_multiplier = computed_noise_multiplier
+        print(f"  Target epsilon for tracking: {args.target_epsilon:.3f}")
         args.sample_rate = sample_rate
     
     dp_config = DPConfig(
@@ -1457,13 +1433,13 @@ def main() -> None:
         final_epsilon = float('inf')
         final_delta = 0.0
    
-    # Generate unique model path with epsilon and timestamp
+    # Generate unique model path with noise multiplier (sigma) and timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    eps_str = f"eps{final_epsilon:.2f}".replace(".", "_")
+    sigma_str = f"sigma{dp_config.noise_multiplier:.2f}".replace(".", "_")
     
     # Update model path if using default
     if args.model_path == 'kan_gat_dp_three_stage.pth':
-        args.model_path = f"kan_gat_dp_three_stage_{eps_str}_{timestamp}.pth"
+        args.model_path = f"kan_gat_dp_three_stage_{sigma_str}_{timestamp}.pth"
     
     print(f"\nOutput model will be saved to: {args.model_path}")
     

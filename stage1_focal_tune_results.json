@@ -1,0 +1,574 @@
+{
+  "best": {
+    "loss": "huber",
+    "huber_delta": 0.5,
+    "focal_gamma": null,
+    "focal_alpha": null,
+    "precision": 0.020833333332465277,
+    "recall": 0.9999999980000001,
+    "f1": 0.0408163261274469,
+    "accuracy": 0.020833333332465277
+  },
+  "all": [
+    {
+      "loss": "bce",
+      "huber_delta": null,
+      "focal_gamma": null,
+      "focal_alpha": null,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "accuracy": 0.979166666625868
+    },
+    {
+      "loss": "huber",
+      "huber_delta": 0.5,
+      "focal_gamma": null,
+      "focal_alpha": null,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 0.5,
+      "focal_alpha": 0.1,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 0.5,
+      "focal_alpha": 0.2,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 0.5,
+      "focal_alpha": 0.3,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 0.5,
+      "focal_alpha": 0.4,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "accuracy": 0.979166666625868
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 0.5,
+      "focal_alpha": 0.5,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 0.5,
+      "focal_alpha": 0.6,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "accuracy": 0.979166666625868
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 0.5,
+      "focal_alpha": 0.7,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "accuracy": 0.979166666625868
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 0.5,
+      "focal_alpha": 0.8,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "accuracy": 0.979166666625868
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 0.5,
+      "focal_alpha": 0.9,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 1.0,
+      "focal_alpha": 0.1,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 1.0,
+      "focal_alpha": 0.2,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 1.0,
+      "focal_alpha": 0.3,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 1.0,
+      "focal_alpha": 0.4,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 1.0,
+      "focal_alpha": 0.5,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 1.0,
+      "focal_alpha": 0.6,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 1.0,
+      "focal_alpha": 0.7,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 1.0,
+      "focal_alpha": 0.8,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 1.0,
+      "focal_alpha": 0.9,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 1.5,
+      "focal_alpha": 0.1,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 1.5,
+      "focal_alpha": 0.2,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 1.5,
+      "focal_alpha": 0.3,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 1.5,
+      "focal_alpha": 0.4,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 1.5,
+      "focal_alpha": 0.5,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 1.5,
+      "focal_alpha": 0.6,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 1.5,
+      "focal_alpha": 0.7,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 1.5,
+      "focal_alpha": 0.8,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 1.5,
+      "focal_alpha": 0.9,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 2.0,
+      "focal_alpha": 0.1,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 2.0,
+      "focal_alpha": 0.2,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 2.0,
+      "focal_alpha": 0.3,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 2.0,
+      "focal_alpha": 0.4,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 2.0,
+      "focal_alpha": 0.5,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 2.0,
+      "focal_alpha": 0.6,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 2.0,
+      "focal_alpha": 0.7,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 2.0,
+      "focal_alpha": 0.8,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 2.0,
+      "focal_alpha": 0.9,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 2.5,
+      "focal_alpha": 0.1,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 2.5,
+      "focal_alpha": 0.2,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 2.5,
+      "focal_alpha": 0.3,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 2.5,
+      "focal_alpha": 0.4,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 2.5,
+      "focal_alpha": 0.5,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 2.5,
+      "focal_alpha": 0.6,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 2.5,
+      "focal_alpha": 0.7,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 2.5,
+      "focal_alpha": 0.8,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 2.5,
+      "focal_alpha": 0.9,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 3.0,
+      "focal_alpha": 0.1,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 3.0,
+      "focal_alpha": 0.2,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 3.0,
+      "focal_alpha": 0.3,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 3.0,
+      "focal_alpha": 0.4,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 3.0,
+      "focal_alpha": 0.5,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 3.0,
+      "focal_alpha": 0.6,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 3.0,
+      "focal_alpha": 0.7,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 3.0,
+      "focal_alpha": 0.8,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    },
+    {
+      "loss": "focal",
+      "huber_delta": null,
+      "focal_gamma": 3.0,
+      "focal_alpha": 0.9,
+      "precision": 0.020833333332465277,
+      "recall": 0.9999999980000001,
+      "f1": 0.0408163261274469,
+      "accuracy": 0.020833333332465277
+    }
+  ]
+}

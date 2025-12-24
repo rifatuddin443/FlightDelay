@@ -1,0 +1,599 @@
+  import scipy.linalg
+Device: cuda
+Run 1/18: delta=0.5, aux_weight=0.0, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.130886 | time=6.4s
+Run 2/18: delta=0.5, aux_weight=0.0, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.337761 | time=6.4s
+Run 3/18: delta=0.5, aux_weight=0.1, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.432684 | time=5.9s
+Run 4/18: delta=0.5, aux_weight=0.1, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.115101 | time=5.7s
+Run 5/18: delta=0.5, aux_weight=0.2, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.427134 | time=5.7s
+Run 6/18: delta=0.5, aux_weight=0.2, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.199390 | time=5.8s
+Run 7/18: delta=1.0, aux_weight=0.0, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.195932 | time=5.7s
+Run 8/18: delta=1.0, aux_weight=0.0, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.057208 | time=5.5s
+Run 9/18: delta=1.0, aux_weight=0.1, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.249501 | time=5.8s
+Run 10/18: delta=1.0, aux_weight=0.1, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.099287 | time=5.6s
+Run 11/18: delta=1.0, aux_weight=0.2, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.406052 | time=5.6s
+Run 12/18: delta=1.0, aux_weight=0.2, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.344992 | time=5.8s
+Run 13/18: delta=2.0, aux_weight=0.0, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.237808 | time=5.6s
+Run 14/18: delta=2.0, aux_weight=0.0, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.256090 | time=5.6s
+Run 15/18: delta=2.0, aux_weight=0.1, aux_start_epoch=1
+  -> val_non_delayed_MSE=5.974073 | time=5.8s
+Run 16/18: delta=2.0, aux_weight=0.1, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.194395 | time=5.8s
+Run 17/18: delta=2.0, aux_weight=0.2, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.322987 | time=5.7s
+Run 18/18: delta=2.0, aux_weight=0.2, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.395621 | time=5.7s
+
+Tuning finished. Best config:
+{
+  "delta": 2.0,
+  "aux_weight": 0.1,
+  "aux_start_epoch": 1,
+  "val_loss": 5.974072589049479,
+  "time_s": 5.817424297332764
+}
+Results saved to D:\flight delay\stpn paper\STPN-main\tune_stage3_results.json
+PS D:\flight delay\stpn paper\STPN-main>
+
+
+PS D:\flight delay\stpn paper\STPN-main> cd "D:\flight delay\stpn paper\STPN-main"; findstr /n "od_mx" classifykat.py
+251:        od_file = 'od_mx.npy'
+255:    od_mx = np.load(os.path.join(data_dir, od_file))
+269:    num_nodes = od_mx.shape[0]
+270:    edge_index_od = torch.tensor(np.array(od_mx.nonzero()), dtype=torch.long)
+271:    edge_index_od_t = torch.tensor(np.array(od_mx.T.nonzero()), dtype=torch.long)
+PS D:\flight delay\stpn paper\STPN-main> cd "D:\flight delay\stpn paper\STPN-main"; findstr /n "data_dir" classifykat.py
+239:    data_dir: str,
+255:    od_mx = np.load(os.path.join(data_dir, od_file))
+256:    adj_mx = np.load(os.path.join(data_dir, adj_file))
+257:    delay_data = np.load(os.path.join(data_dir, delay_file))
+259:    weather_path = os.path.join(data_dir, weather_file)
+795:    data_dir = args.data_source
+818:        data_dir,
+PS D:\flight delay\stpn paper\STPN-main> cd "D:\flight delay\stpn paper\STPN-main"; powershell -Command "(Get-Content classifykat.py)[220..280]"
+        hidden_dropped = self.dropout_cls(hidden)
+        logits = self.classifier(hidden_dropped)
+        return hidden, logits
+
+    def forward_regressor(self, hidden: torch.Tensor) -> torch.Tensor:
+        """Stage 2: Regress on precomputed embeddings."""
+        hidden_dropped = self.dropout_reg(hidden)
+        return self.regressor(hidden_dropped)
+
+    def forward(self, data: Data) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Full forward pass for inference."""
+        hidden = self.encoder(data)
+        logits = self.classifier(self.dropout_cls(hidden))
+        reg_out = self.regressor(self.dropout_reg(hidden))
+        return logits, reg_out
+
+
+def load_flight_data(
+    data_dir: str,
+    train_ratio: float = 0.7,
+    val_ratio: float = 0.1,
+    weather_file: str = 'weather_cn.npy',
+    period_hours: int = 24,
+    data_source: str = 'cdata',
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, StandardScaler, int]:
+    if data_source == 'udata':
+        od_file = 'od_pair.npy'
+        adj_file = 'adj_mx.npy'
+        delay_file = 'udelay.npy'
+    else:
+        od_file = 'od_mx.npy'
+        adj_file = 'dist_mx.npy'
+        delay_file = 'delay.npy'
+
+    od_mx = np.load(os.path.join(data_dir, od_file))
+    adj_mx = np.load(os.path.join(data_dir, adj_file))
+    delay_data = np.load(os.path.join(data_dir, delay_file))
+
+    weather_path = os.path.join(data_dir, weather_file)
+    if not os.path.exists(weather_path):
+        raise FileNotFoundError(f"Weather file not found: {weather_path}")
+    weather_data = np.load(weather_path)
+    if weather_data.ndim == 2:
+        weather_data = weather_data[..., np.newaxis]
+
+    if weather_data.shape[0] != delay_data.shape[0] or weather_data.shape[1] != delay_data.shape[1]:  
+        raise ValueError('Weather data shape must align with delay data (num_nodes, timesteps, features).')
+
+    num_nodes = od_mx.shape[0]
+    edge_index_od = torch.tensor(np.array(od_mx.nonzero()), dtype=torch.long)
+    edge_index_od_t = torch.tensor(np.array(od_mx.T.nonzero()), dtype=torch.long)
+    edge_index_adj = torch.tensor(np.array(adj_mx.nonzero()), dtype=torch.long)
+
+    total_steps = delay_data.shape[1]
+    train_end = int(train_ratio * total_steps)
+    val_end = int((train_ratio + val_ratio) * total_steps)
+
+    train_raw = delay_data[:, :train_end, :]
+    val_raw = delay_data[:, train_end:val_end, :]
+    test_raw = delay_data[:, val_end:, :]
+
+PS D:\flight delay\stpn paper\STPN-main> cd "D:\flight delay\stpn paper\STPN-main"; & 'c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\python.exe' 'D:\flight delay\stpn paper\STPN-main\tune_stage3_quick.py' --sample_size 256 --epochs 2 --batch_size 16
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'pyg-lib'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-scatter'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-cluster'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-spline-conv'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-sparse'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\statsmodels\tools\tools.py:6: UserWarning: A NumPy version >=1.22.4 and <2.3.0 is required for this version of SciPy (detected version 2.3.5)
+  import scipy.linalg
+Device: cuda
+Run 1/18: delta=0.5, aux_weight=0.0, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.130886 | time=6.4s
+Run 2/18: delta=0.5, aux_weight=0.0, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.337761 | time=6.4s
+Run 3/18: delta=0.5, aux_weight=0.1, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.432684 | time=5.9s
+Run 4/18: delta=0.5, aux_weight=0.1, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.115101 | time=5.7s
+Run 5/18: delta=0.5, aux_weight=0.2, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.427134 | time=5.7s
+Run 6/18: delta=0.5, aux_weight=0.2, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.199390 | time=5.8s
+Run 7/18: delta=1.0, aux_weight=0.0, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.195932 | time=5.7s
+Run 8/18: delta=1.0, aux_weight=0.0, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.057208 | time=5.5s
+Run 9/18: delta=1.0, aux_weight=0.1, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.249501 | time=5.8s
+Run 10/18: delta=1.0, aux_weight=0.1, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.099287 | time=5.6s
+Run 11/18: delta=1.0, aux_weight=0.2, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.406052 | time=5.6s
+Run 12/18: delta=1.0, aux_weight=0.2, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.344992 | time=5.8s
+Run 13/18: delta=2.0, aux_weight=0.0, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.237808 | time=5.6s
+Run 14/18: delta=2.0, aux_weight=0.0, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.256090 | time=5.6s
+Run 15/18: delta=2.0, aux_weight=0.1, aux_start_epoch=1
+  -> val_non_delayed_MSE=5.974073 | time=5.8s
+Run 16/18: delta=2.0, aux_weight=0.1, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.194395 | time=5.8s
+Run 17/18: delta=2.0, aux_weight=0.2, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.322987 | time=5.7s
+Run 18/18: delta=2.0, aux_weight=0.2, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.395621 | time=5.7s
+
+Tuning finished. Best config:
+{
+  "delta": 2.0,
+  "aux_weight": 0.1,
+  "aux_start_epoch": 1,
+  "val_loss": 5.974072589049479,
+  "time_s": 5.817424297332764
+}
+Results saved to D:\flight delay\stpn paper\STPN-main\tune_stage3_results.json
+PS D:\flight delay\stpn paper\STPN-main> cd "D:\flight delay\stpn paper\STPN-main"; & 'c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\python.exe' 'D:\flight delay\stpn paper\STPN-main\tune_stage3_quick.py' --sample_size 1024 --epochs 3 --batch_size 16
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'pyg-lib'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-scatter'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-cluster'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-spline-conv'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-sparse'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\statsmodels\tools\tools.py:6: UserWarning: A NumPy version >=1.22.4 and <2.3.0 is required for this version of SciPy (detected version 2.3.5)
+  import scipy.linalg
+Device: cuda
+Run 1/18: delta=0.5, aux_weight=0.0, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.715272 | time=35.4s
+Run 2/18: delta=0.5, aux_weight=0.0, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.807498 | time=37.6s
+Run 3/18: delta=0.5, aux_weight=0.1, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.726680 | time=35.6s
+Run 4/18: delta=0.5, aux_weight=0.1, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.779974 | time=35.7s
+Run 5/18: delta=0.5, aux_weight=0.2, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.814212 | time=35.7s
+Run 6/18: delta=0.5, aux_weight=0.2, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.761221 | time=35.2s
+Run 7/18: delta=1.0, aux_weight=0.0, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.756185 | time=36.3s
+Run 8/18: delta=1.0, aux_weight=0.0, aux_start_epoch=2
+  -> val_non_delayed_MSE=7.061799 | time=35.2s
+Run 9/18: delta=1.0, aux_weight=0.1, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.781765 | time=35.5s
+Run 10/18: delta=1.0, aux_weight=0.1, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.733507 | time=35.4s
+Run 11/18: delta=1.0, aux_weight=0.2, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.674343 | time=34.9s
+Run 12/18: delta=1.0, aux_weight=0.2, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.782078 | time=34.8s
+Run 13/18: delta=2.0, aux_weight=0.0, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.728210 | time=35.4s
+Run 14/18: delta=2.0, aux_weight=0.0, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.963107 | time=34.5s
+Run 15/18: delta=2.0, aux_weight=0.1, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.755876 | time=35.2s
+Run 16/18: delta=2.0, aux_weight=0.1, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.805033 | time=35.4s
+Run 17/18: delta=2.0, aux_weight=0.2, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.814950 | time=35.0s
+Run 18/18: delta=2.0, aux_weight=0.2, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.936546 | time=35.0s
+
+Tuning finished. Best config:
+{
+  "delta": 1.0,
+  "aux_weight": 0.2,
+  "aux_start_epoch": 1,
+  "val_loss": 6.674342578107067,
+  "time_s": 34.93365812301636
+}
+Results saved to D:\flight delay\stpn paper\STPN-main\tune_stage3_results.json
+PS D:\flight delay\stpn paper\STPN-main> cd "D:\flight delay\stpn paper\STPN-main"; & 'c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\python.exe' 'D:\flight delay\stpn paper\STPN-main\tune_stage3_quick.py' --sample_size 1200 --epochs 4 --batch_size 16 --deltas 0.5,1.0,1.5,2.0 --aux_weights 0.0,0.1,0.2,0.3 --aux_start_epochs 1,2
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'pyg-lib'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-scatter'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-cluster'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-spline-conv'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-sparse'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\statsmodels\tools\tools.py:6: UserWarning: A NumPy version >=1.22.4 and <2.3.0 is required for this version of SciPy (detected version 2.3.5)
+  import scipy.linalg
+Device: cuda
+Run 1/32: delta=0.5, aux_weight=0.0, aux_start_epoch=1
+  -> val_non_delayed_MSE=7.034709 | time=56.7s
+Run 2/32: delta=0.5, aux_weight=0.0, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.968419 | time=54.0s
+Run 3/32: delta=0.5, aux_weight=0.1, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.784423 | time=54.4s
+Run 4/32: delta=0.5, aux_weight=0.1, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.851146 | time=53.6s
+Run 5/32: delta=0.5, aux_weight=0.2, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.958472 | time=52.0s
+Run 6/32: delta=0.5, aux_weight=0.2, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.858190 | time=52.0s
+Run 7/32: delta=0.5, aux_weight=0.3, aux_start_epoch=1
+  -> val_non_delayed_MSE=7.133921 | time=51.8s
+Run 8/32: delta=0.5, aux_weight=0.3, aux_start_epoch=2
+  -> val_non_delayed_MSE=7.399197 | time=51.9s
+Run 9/32: delta=1.0, aux_weight=0.0, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.743127 | time=52.7s
+Run 10/32: delta=1.0, aux_weight=0.0, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.933256 | time=52.2s
+Run 11/32: delta=1.0, aux_weight=0.1, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.719166 | time=52.5s
+Run 12/32: delta=1.0, aux_weight=0.1, aux_start_epoch=2
+  -> val_non_delayed_MSE=7.031853 | time=51.8s
+Run 13/32: delta=1.0, aux_weight=0.2, aux_start_epoch=1
+  -> val_non_delayed_MSE=7.217487 | time=52.1s
+Run 14/32: delta=1.0, aux_weight=0.2, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.918788 | time=52.4s
+Run 15/32: delta=1.0, aux_weight=0.3, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.733586 | time=51.8s
+Run 16/32: delta=1.0, aux_weight=0.3, aux_start_epoch=2
+  -> val_non_delayed_MSE=7.234026 | time=52.8s
+Run 17/32: delta=1.5, aux_weight=0.0, aux_start_epoch=1
+  -> val_non_delayed_MSE=7.021569 | time=53.0s
+Run 18/32: delta=1.5, aux_weight=0.0, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.888274 | time=53.2s
+Run 19/32: delta=1.5, aux_weight=0.1, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.833255 | time=53.6s
+Run 20/32: delta=1.5, aux_weight=0.1, aux_start_epoch=2
+  -> val_non_delayed_MSE=7.198781 | time=52.5s
+Run 21/32: delta=1.5, aux_weight=0.2, aux_start_epoch=1
+  -> val_non_delayed_MSE=7.493716 | time=55.0s
+Run 22/32: delta=1.5, aux_weight=0.2, aux_start_epoch=2
+  -> val_non_delayed_MSE=7.159268 | time=52.7s
+Run 23/32: delta=1.5, aux_weight=0.3, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.682251 | time=51.8s
+Run 24/32: delta=1.5, aux_weight=0.3, aux_start_epoch=2
+  -> val_non_delayed_MSE=7.036968 | time=52.5s
+Run 25/32: delta=2.0, aux_weight=0.0, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.918399 | time=52.5s
+Run 26/32: delta=2.0, aux_weight=0.0, aux_start_epoch=2
+  -> val_non_delayed_MSE=6.810679 | time=52.8s
+Run 27/32: delta=2.0, aux_weight=0.1, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.708578 | time=52.3s
+Run 28/32: delta=2.0, aux_weight=0.1, aux_start_epoch=2
+  -> val_non_delayed_MSE=7.116152 | time=52.9s
+Run 29/32: delta=2.0, aux_weight=0.2, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.562452 | time=52.2s
+Run 30/32: delta=2.0, aux_weight=0.2, aux_start_epoch=2
+  -> val_non_delayed_MSE=7.086302 | time=51.9s
+Run 31/32: delta=2.0, aux_weight=0.3, aux_start_epoch=1
+  -> val_non_delayed_MSE=6.626616 | time=52.3s
+Run 32/32: delta=2.0, aux_weight=0.3, aux_start_epoch=2
+  -> val_non_delayed_MSE=7.096410 | time=51.9s
+
+Tuning finished. Best config:
+{
+  "delta": 2.0,
+  "aux_weight": 0.2,
+  "aux_start_epoch": 1,
+  "val_loss": 6.56245175493265,
+  "time_s": 52.15601658821106
+}
+Results saved to D:\flight delay\stpn paper\STPN-main\tune_stage3_results.json
+PS D:\flight delay\stpn paper\STPN-main> cd "D:\flight delay\stpn paper\STPN-main"; & 'c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\python.exe' 'D:\flight delay\stpn paper\STPN-main\tune_stage3_quick.py' --sample_size 1200 --epochs 4 --batch_size 16 --deltas 2.5,3.0,3.5 --aux_weights 0.1,0.2,0.3 --aux_start_epochs 1,2
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'pyg-lib'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-scatter'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-cluster'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-spline-conv'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-sparse'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\statsmodels\tools\tools.py:6: UserWarning: A NumPy version >=1.22.4 and <2.3.0 is required for this version of SciPy (detected version 2.3.5)
+  import scipy.linalg
+Device: cuda
+Run 1/18: delta=2.5, aux_weight=0.1, aux_start_epoch=1
+  -> val_non_delayed_MSE=7.706206 | time=56.3s
+Run 2/18: delta=2.5, aux_weight=0.1, aux_start_epoch=2
+  -> val_non_delayed_MSE=7.617896 | time=54.0s
+Run 3/18: delta=2.5, aux_weight=0.2, aux_start_epoch=1
+  -> val_non_delayed_MSE=7.558961 | time=54.0s
+Run 4/18: delta=2.5, aux_weight=0.2, aux_start_epoch=2
+  -> val_non_delayed_MSE=7.857931 | time=55.3s
+Run 5/18: delta=2.5, aux_weight=0.3, aux_start_epoch=1
+  -> val_non_delayed_MSE=7.579269 | time=53.6s
+Run 6/18: delta=2.5, aux_weight=0.3, aux_start_epoch=2
+  -> val_non_delayed_MSE=7.568278 | time=54.1s
+Run 7/18: delta=3.0, aux_weight=0.1, aux_start_epoch=1
+  -> val_non_delayed_MSE=7.685230 | time=54.5s
+Run 8/18: delta=3.0, aux_weight=0.1, aux_start_epoch=2
+  -> val_non_delayed_MSE=7.524525 | time=56.2s
+Run 9/18: delta=3.0, aux_weight=0.2, aux_start_epoch=1
+  -> val_non_delayed_MSE=7.366206 | time=55.5s
+Run 10/18: delta=3.0, aux_weight=0.2, aux_start_epoch=2
+  -> val_non_delayed_MSE=7.536619 | time=54.4s
+Run 11/18: delta=3.0, aux_weight=0.3, aux_start_epoch=1
+  -> val_non_delayed_MSE=7.607113 | time=53.4s
+Run 12/18: delta=3.0, aux_weight=0.3, aux_start_epoch=2
+  -> val_non_delayed_MSE=7.638400 | time=52.6s
+Run 13/18: delta=3.5, aux_weight=0.1, aux_start_epoch=1
+  -> val_non_delayed_MSE=7.662791 | time=63.5s
+Run 14/18: delta=3.5, aux_weight=0.1, aux_start_epoch=2
+  -> val_non_delayed_MSE=7.553177 | time=71.2s
+Run 15/18: delta=3.5, aux_weight=0.2, aux_start_epoch=1
+  -> val_non_delayed_MSE=7.353213 | time=71.3s
+Run 16/18: delta=3.5, aux_weight=0.2, aux_start_epoch=2
+  -> val_non_delayed_MSE=7.699288 | time=60.9s
+Run 17/18: delta=3.5, aux_weight=0.3, aux_start_epoch=1
+  -> val_non_delayed_MSE=7.810732 | time=56.8s
+Run 18/18: delta=3.5, aux_weight=0.3, aux_start_epoch=2
+  -> val_non_delayed_MSE=7.809587 | time=56.4s
+
+Tuning finished. Best config:
+{
+  "delta": 3.5,
+  "aux_weight": 0.2,
+  "aux_start_epoch": 1,
+  "val_loss": 7.353212746430099,
+  "time_s": 71.26667976379395
+}
+Results saved to D:\flight delay\stpn paper\STPN-main\tune_stage3_results.json
+PS D:\flight delay\stpn paper\STPN-main> cd "D:\flight delay\stpn paper\STPN-main"; & 'c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\python.exe' - <<'PYCODE'
+At line:1 char:118
++ ... enovo\AppData\Local\Programs\Python\Python311\python.exe' - <<'PYCODE ...
++                                                                  ~
+Missing file specification after redirection operator.
+At line:1 char:117
++ ... enovo\AppData\Local\Programs\Python\Python311\python.exe' - <<'PYCODE ...
++                                                                 ~
+The '<' operator is reserved for future use.
+At line:1 char:118
++ ... novo\AppData\Local\Programs\Python\Python311\python.exe' - <<'PYCODE'
++                                                                 ~
+The '<' operator is reserved for future use.
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : MissingFileSpecification
+
+PS D:\flight delay\stpn paper\STPN-main> import json
+import : The term 'import' is not recognized as the name of a cmdlet, function, script file, or 
+operable program. Check the spelling of the name, or if a path was included, verify that the path is  
+correct and try again.
+At line:1 char:1
++ import json
++ ~~~~~~
+    + CategoryInfo          : ObjectNotFound: (import:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+
+PS D:\flight delay\stpn paper\STPN-main> from pathlib import Path
+At line:1 char:1
++ from pathlib import Path
++ ~~~~
+The 'from' keyword is not supported in this version of the language.
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : ReservedKeywordNotAllowed
+
+PS D:\flight delay\stpn paper\STPN-main> p = Path('D:/flight delay/stpn paper/STPN-main/tune_stage3_results.json')
+p : The term 'p' is not recognized as the name of a cmdlet, function, script file, or operable 
+program. Check the spelling of the name, or if a path was included, verify that the path is correct   
+and try again.
+At line:1 char:1
++ p = Path('D:/flight delay/stpn paper/STPN-main/tune_stage3_results.js ...
++ ~
+    + CategoryInfo          : ObjectNotFound: (p:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+
+PS D:\flight delay\stpn paper\STPN-main> print(p.read_text())
+At line:1 char:19
++ print(p.read_text())
++                   ~
+An expression was expected after '('.
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : ExpectedExpression
+
+PS D:\flight delay\stpn paper\STPN-main> PYCODE
+PYCODE : The term 'PYCODE' is not recognized as the name of a cmdlet, function, script file, or 
+operable program. Check the spelling of the name, or if a path was included, verify that the path is  
+correct and try again.
+At line:1 char:1
++ PYCODE
++ ~~~~~~
+    + CategoryInfo          : ObjectNotFound: (PYCODE:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+
+PS D:\flight delay\stpn paper\STPN-main> cd "D:\flight delay\stpn paper\STPN-main"; & 'c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\python.exe' -c "import json, pathlib; p=pathlib.Path('D:/flight delay/stpn paper/STPN-main/tune_stage3_results.json'); print(p.read_text())"
+{
+  "best": {
+    "delta": 3.5,
+    "aux_weight": 0.2,
+    "aux_start_epoch": 1,
+    "val_loss": 7.353212746430099,
+    "time_s": 71.26667976379395
+  },
+  "all": [
+    {
+      "delta": 2.5,
+      "aux_weight": 0.1,
+      "aux_start_epoch": 1,
+      "val_loss": 7.706205821754186,
+      "time_s": 56.298964738845825
+    },
+    {
+      "delta": 2.5,
+      "aux_weight": 0.1,
+      "aux_start_epoch": 2,
+      "val_loss": 7.617895530522762,
+      "time_s": 53.99952149391174
+    },
+    {
+      "delta": 2.5,
+      "aux_weight": 0.2,
+      "aux_start_epoch": 1,
+      "val_loss": 7.558960535535351,
+      "time_s": 54.00054407119751
+    },
+    {
+      "delta": 2.5,
+      "aux_weight": 0.2,
+      "aux_start_epoch": 2,
+      "val_loss": 7.857930789937792,
+      "time_s": 55.34013652801514
+    },
+    {
+      "delta": 2.5,
+      "aux_weight": 0.3,
+      "aux_start_epoch": 1,
+      "val_loss": 7.579268507713878,
+      "time_s": 53.617111921310425
+    },
+    {
+      "delta": 2.5,
+      "aux_weight": 0.3,
+      "aux_start_epoch": 2,
+      "val_loss": 7.568277576197134,
+      "time_s": 54.059990644454956
+    },
+    {
+      "delta": 3.0,
+      "aux_weight": 0.1,
+      "aux_start_epoch": 1,
+      "val_loss": 7.685230125128008,
+      "time_s": 54.513378620147705
+    },
+    {
+      "delta": 3.0,
+      "aux_weight": 0.1,
+      "aux_start_epoch": 2,
+      "val_loss": 7.524525012362252,
+      "time_s": 56.22199606895447
+    },
+    {
+      "delta": 3.0,
+      "aux_weight": 0.2,
+      "aux_start_epoch": 1,
+      "val_loss": 7.366206164977507,
+      "time_s": 55.472798585891724
+    },
+    {
+      "delta": 3.0,
+      "aux_weight": 0.2,
+      "aux_start_epoch": 2,
+      "val_loss": 7.536619220509308,
+      "time_s": 54.424598932266235
+    },
+    {
+      "delta": 3.0,
+      "aux_weight": 0.3,
+      "aux_start_epoch": 1,
+      "val_loss": 7.60711324646399,
+      "time_s": 53.4063241481781
+    },
+    {
+      "delta": 3.0,
+      "aux_weight": 0.3,
+      "aux_start_epoch": 2,
+      "val_loss": 7.638400114300169,
+      "time_s": 52.598963022232056
+    },
+    {
+      "delta": 3.5,
+      "aux_weight": 0.1,
+      "aux_start_epoch": 1,
+      "val_loss": 7.662791424388626,
+      "time_s": 63.526540994644165
+    },
+    {
+      "delta": 3.5,
+      "aux_weight": 0.1,
+      "aux_start_epoch": 2,
+      "val_loss": 7.5531772759295945,
+      "time_s": 71.18801355361938
+    },
+    {
+      "delta": 3.5,
+      "aux_weight": 0.2,
+      "aux_start_epoch": 1,
+      "val_loss": 7.353212746430099,
+      "time_s": 71.26667976379395
+    },
+    {
+      "delta": 3.5,
+      "aux_weight": 0.2,
+      "aux_start_epoch": 2,
+      "val_loss": 7.699287666264025,
+      "time_s": 60.91932940483093
+    },
+    {
+      "delta": 3.5,
+      "aux_weight": 0.3,
+      "aux_start_epoch": 1,
+      "val_loss": 7.810732231745442,
+      "time_s": 56.76210594177246
+    },
+    {
+      "delta": 3.5,
+      "aux_weight": 0.3,
+      "aux_start_epoch": 2,
+      "val_loss": 7.8095873987548154,
+      "time_s": 56.402013301849365
+    }
+  ],
+  "total_time_s": 1034.0200107097626
+}
+PS D:\flight delay\stpn paper\STPN-main>
+
+

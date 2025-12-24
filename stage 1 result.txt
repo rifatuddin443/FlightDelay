@@ -1,0 +1,115 @@
+Running BCE baseline...
+[bce] epoch 1/5 mean loss: 0.4805
+[bce] epoch 2/5 mean loss: 0.4644
+[bce] epoch 3/5 mean loss: 0.4537
+[bce] epoch 4/5 mean loss: 0.4460
+[bce] epoch 5/5 mean loss: 0.4408
+Finished BCE baseline | F1=0.000 Acc=0.977
+Running Huber delta=1.0...
+[huber] epoch 1/5 mean loss: 0.0269
+[huber] epoch 2/5 mean loss: 0.0174
+[huber] epoch 3/5 mean loss: 0.0147
+[huber] epoch 4/5 mean loss: 0.0127
+[huber] epoch 5/5 mean loss: 0.0107
+Finished Huber delta=1.0 | F1=0.113 Acc=0.882
+Running Huber delta=2.0...
+[huber] epoch 1/5 mean loss: 0.0261
+[huber] epoch 2/5 mean loss: 0.0174
+[huber] epoch 3/5 mean loss: 0.0152
+[huber] epoch 4/5 mean loss: 0.0128
+[huber] epoch 5/5 mean loss: 0.0108
+Finished Huber delta=2.0 | F1=0.078 Acc=0.822
+Running Huber delta=3.0...
+[huber] epoch 1/5 mean loss: 0.0248
+[huber] epoch 2/5 mean loss: 0.0182
+[huber] epoch 3/5 mean loss: 0.0161
+[huber] epoch 4/5 mean loss: 0.0142
+[huber] epoch 5/5 mean loss: 0.0127
+Finished Huber delta=3.0 | F1=0.048 Acc=0.405
+Running Focal gamma=1.5, alpha=0.25...
+[focal] epoch 1/5 mean loss: 0.0956
+[focal] epoch 2/5 mean loss: 0.0844
+[focal] epoch 3/5 mean loss: 0.0819
+[focal] epoch 4/5 mean loss: 0.0792
+[focal] epoch 5/5 mean loss: 0.0766
+Finished Focal gamma=1.5, alpha=0.25 | F1=0.084 Acc=0.782
+Running Focal gamma=1.5, alpha=0.5...
+[focal] epoch 1/5 mean loss: 0.1068
+[focal] epoch 2/5 mean loss: 0.0835
+[focal] epoch 3/5 mean loss: 0.0812
+[focal] epoch 4/5 mean loss: 0.0791
+[focal] epoch 5/5 mean loss: 0.0770
+Finished Focal gamma=1.5, alpha=0.5 | F1=0.038 Acc=0.107
+Running Focal gamma=2.0, alpha=0.25...
+[focal] epoch 1/5 mean loss: 0.0686
+[focal] epoch 2/5 mean loss: 0.0595
+[focal] epoch 3/5 mean loss: 0.0584
+[focal] epoch 4/5 mean loss: 0.0565
+[focal] epoch 5/5 mean loss: 0.0537
+Finished Focal gamma=2.0, alpha=0.25 | F1=0.111 Acc=0.880
+Running Focal gamma=2.0, alpha=0.5...
+[focal] epoch 1/5 mean loss: 0.0771
+[focal] epoch 2/5 mean loss: 0.0589
+[focal] epoch 3/5 mean loss: 0.0575
+[focal] epoch 4/5 mean loss: 0.0554
+[focal] epoch 5/5 mean loss: 0.0537
+Finished Focal gamma=2.0, alpha=0.5 | F1=0.073 Acc=0.555
+Running DP combo beta=2.0, gamma=1.5, alpha_epoch=1.0...
+[dp_combo] epoch 1/5 mean loss: 0.1357
+[dp_combo] epoch 2/5 mean loss: 0.0694
+[dp_combo] epoch 3/5 mean loss: 0.0791
+[dp_combo] epoch 4/5 mean loss: 0.0893
+[dp_combo] epoch 5/5 mean loss: 0.0930
+Finished DP combo beta=2.0, gamma=1.5, alpha_epoch=1.0 | F1=0.036 Acc=0.050
+Running DP combo beta=2.0, gamma=1.5, alpha_epoch=2.0...
+[dp_combo] epoch 1/5 mean loss: 0.1319
+[dp_combo] epoch 2/5 mean loss: 0.0507
+[dp_combo] epoch 3/5 mean loss: 0.0601
+[dp_combo] epoch 4/5 mean loss: 0.0776
+[dp_combo] epoch 5/5 mean loss: 0.0878
+Finished DP combo beta=2.0, gamma=1.5, alpha_epoch=2.0 | F1=0.037 Acc=0.092
+Running DP combo beta=2.0, gamma=2.0, alpha_epoch=1.0...
+[dp_combo] epoch 1/5 mean loss: 0.1206
+[dp_combo] epoch 2/5 mean loss: 0.0523
+[dp_combo] epoch 3/5 mean loss: 0.0565
+[dp_combo] epoch 4/5 mean loss: 0.0629
+[dp_combo] epoch 5/5 mean loss: 0.0649
+Finished DP combo beta=2.0, gamma=2.0, alpha_epoch=1.0 | F1=0.036 Acc=0.055
+Running DP combo beta=2.0, gamma=2.0, alpha_epoch=2.0...
+[dp_combo] epoch 1/5 mean loss: 0.1221
+[dp_combo] epoch 2/5 mean loss: 0.0417
+[dp_combo] epoch 3/5 mean loss: 0.0440
+[dp_combo] epoch 4/5 mean loss: 0.0545
+[dp_combo] epoch 5/5 mean loss: 0.0611
+Finished DP combo beta=2.0, gamma=2.0, alpha_epoch=2.0 | F1=0.034 Acc=0.020
+Running DP combo beta=4.0, gamma=1.5, alpha_epoch=1.0...
+[dp_combo] epoch 1/5 mean loss: 0.1230
+[dp_combo] epoch 2/5 mean loss: 0.0674
+[dp_combo] epoch 3/5 mean loss: 0.0803
+[dp_combo] epoch 4/5 mean loss: 0.0905
+[dp_combo] epoch 5/5 mean loss: 0.0944
+Finished DP combo beta=4.0, gamma=1.5, alpha_epoch=1.0 | F1=0.034 Acc=0.017
+Running DP combo beta=4.0, gamma=1.5, alpha_epoch=2.0...
+[dp_combo] epoch 1/5 mean loss: 0.1264
+[dp_combo] epoch 2/5 mean loss: 0.0524
+[dp_combo] epoch 3/5 mean loss: 0.0620
+[dp_combo] epoch 4/5 mean loss: 0.0784
+[dp_combo] epoch 5/5 mean loss: 0.0892
+Finished DP combo beta=4.0, gamma=1.5, alpha_epoch=2.0 | F1=0.034 Acc=0.017
+Running DP combo beta=4.0, gamma=2.0, alpha_epoch=1.0...
+[dp_combo] epoch 1/5 mean loss: 0.1096
+[dp_combo] epoch 2/5 mean loss: 0.0493
+[dp_combo] epoch 3/5 mean loss: 0.0558
+[dp_combo] epoch 4/5 mean loss: 0.0619
+[dp_combo] epoch 5/5 mean loss: 0.0641
+Finished DP combo beta=4.0, gamma=2.0, alpha_epoch=1.0 | F1=0.034 Acc=0.020
+Running DP combo beta=4.0, gamma=2.0, alpha_epoch=2.0...
+[dp_combo] epoch 1/5 mean loss: 0.1377
+[dp_combo] epoch 2/5 mean loss: 0.0437
+[dp_combo] epoch 3/5 mean loss: 0.0450
+[dp_combo] epoch 4/5 mean loss: 0.0549
+[dp_combo] epoch 5/5 mean loss: 0.0618
+Finished DP combo beta=4.0, gamma=2.0, alpha_epoch=2.0 | F1=0.034 Acc=0.017
+
+Best config (by F1): {'loss': 'huber', 'huber_delta': 1.0, 'focal_gamma': None, 'focal_alpha': None, 'composite_beta': None, 'composite_gamma': None, 'composite_alpha_epoch': None, 'precision': np.float64(0.06521739129017014), 'recall': np.float64(0.4285714279591837), 'f1': np.float64(0.11320754483446072), 'accuracy': np.float64(0.8824999999779375)}
+Results saved to D:\flight delay\stpn paper\STPN-main\stage1_loss_tune_results.json

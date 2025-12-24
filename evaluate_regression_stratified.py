@@ -340,13 +340,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Test three-stage DP models with separate horizon-wise evaluation.",
     )
-    parser.add_argument(
-        "--model_path",
-        type=str,
-        default="auto",
+    parser.add_argument("--model_path",       type=str,        default="auto",
         help="Path to the three-stage trained checkpoint. Use 'auto' to find the latest kan_gat_dp_three_stage_*.pth file.",
     )
-    parser.add_argument("--data_source", type=str, default="udata", choices=["cdata", "udata"])
+    parser.add_argument("--data_source", type=str, default="cdata", choices=["cdata", "udata"])
     parser.add_argument("--seq_len", type=int, default=8)
     parser.add_argument("--horizons", type=int, nargs="+", default=[3, 6, 12])
     parser.add_argument("--delay_threshold", type=float, default=5.0)

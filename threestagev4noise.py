@@ -1271,7 +1271,7 @@ def load_checkpoint(model, optimizer, path):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Three-stage DP-SGD for KAN-GAT with epsilon budget control")
-    parser.add_argument('--data_source', type=str, default='udata', choices=['cdata', 'udata'])
+    parser.add_argument('--data_source', type=str, default='cdata', choices=['cdata', 'udata'])
     parser.add_argument('--seq_len', type=int, default=8)
     parser.add_argument(
         '--horizons',
@@ -1301,6 +1301,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--epsilon_tolerance', type=float, default=0.05)
     parser.add_argument('--model_path', type=str, default='kan_gat_dp_three_stage.pth')
     parser.add_argument('--seed', type=int, default=None, help='Random seed (None for random)')
+    parser.add_argument('--balance_50_50', action='store_true', default=True, help='Apply random undersampling to achieve 50-50 class balance')
     return parser.parse_args()
 
 
@@ -1365,6 +1366,44 @@ def main() -> None:
         args.seq_len, max_horizon, args.delay_threshold, horizons
     )
     
+    if args.balance_50_50:
+        print("\n[INFO] Applying random undersampling for 50-50 balance...")
+        # Determine sample-level labels (majority vote for node-level)
+        sample_means = train_y_cls.mean(dim=(1, 2))
+        sample_labels = (sample_means >= 0.5).long()
+        
+        pos_indices = (sample_labels == 1).nonzero(as_tuple=True)[0]
+        neg_indices = (sample_labels == 0).nonzero(as_tuple=True)[0]
+        
+        n_pos = len(pos_indices)
+        n_neg = len(neg_indices)
+        
+        print(f"  Original counts - Positive (Delayed): {n_pos}, Negative: {n_neg}")
+        
+        if n_pos > 0 and n_neg > 0:
+            min_count = min(n_pos, n_neg)
+            print(f"  Undersampling to {min_count} samples per class...")
+            
+            # Randomly select indices
+            perm_pos = torch.randperm(n_pos)[:min_count]
+            perm_neg = torch.randperm(n_neg)[:min_count]
+            
+            selected_pos = pos_indices[perm_pos]
+            selected_neg = neg_indices[perm_neg]
+            
+            # Combine and shuffle
+            combined_indices = torch.cat([selected_pos, selected_neg])
+            combined_indices = combined_indices[torch.randperm(len(combined_indices))]
+            
+            # Apply selection
+            train_x = train_x[combined_indices]
+            train_y_reg = train_y_reg[combined_indices]
+            train_y_cls = train_y_cls[combined_indices]
+            
+            print(f"  New training set size: {len(train_x)}")
+        else:
+            print("  WARNING: Cannot balance 50-50 because one class has 0 samples. Skipping undersampling.")
+
     print(f"\n[DATA] Class distribution:")
     print(f"  Train: {train_y_cls.mean().item():.2%} delayed")
     print(f"  Val: {val_y_cls.mean().item():.2%} delayed")

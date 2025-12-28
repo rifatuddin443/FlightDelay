@@ -9,8 +9,10 @@ import csv
 import os
 import sys
 import time
+import traceback
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
 import numpy as np
@@ -31,7 +33,9 @@ try:
     from sklearn.model_selection import GridSearchCV, StratifiedKFold
     from sklearn.preprocessing import StandardScaler
     from sklearn.metrics import f1_score, make_scorer
-except Exception:
+except Exception as exc:
+    print("[WARN] Failed to import imblearn/sklearn dependencies:", exc)
+    traceback.print_exc()
     ADASYN = RandomOverSampler = SMOTE = BorderlineSMOTE = None
     RandomUnderSampler = TomekLinks = None
     SMOTEENN = SMOTETomek = None
@@ -48,20 +52,205 @@ from classifykat import (
     SequentialTwoStagePredictor,
     build_sequences,
     classification_metrics,
+    train_stage1_classifier,
     load_flight_data,
     set_seed,
 )
 from classifykat_balanced import build_sequences_node_level
-from threestagev3debug2 import (
-    RDPAccountant,
-    DPConfig,
-    PerSampleGradientClipper,
-    aggregate_node_to_graph,
-    ensure_graph_level_target,
-    graph_level_binary_labels,
-    build_balanced_indices,
-    setup_checkpoint_directory
-)
+# Inlined utilities (originally from threestagev3debug2)
+
+@dataclass
+class RDPAccountant:
+    """Opacus-style RDP accountant with Poisson subsampling."""
+    noise_multiplier: float
+    sample_rate: float
+    steps: int = 0
+
+    def step(self) -> None:
+        self.steps += 1
+
+    def _rdp_gaussian(self, alpha: float, sigma: float) -> float:
+        if alpha < 1:
+            return 0.0
+        return alpha * (1 + 1 / (2 * sigma**2 * alpha)) * np.log1p(1 / (sigma**2 * alpha))
+
+    def _rdp_subsampling(self, alpha: float, q: float, rdp_full: float) -> float:
+        if q == 0 or q == 1:
+            return rdp_full
+        return (np.exp((alpha - 1) * np.log1p(q)) - 1) * rdp_full
+
+    def get_epsilon(self, delta: float, orders: Optional[List[float]] = None) -> float:
+        if self.steps == 0:
+            return 0.0
+        if orders is None:
+            orders = np.logspace(1.0, 10.0, 100).tolist()
+
+        sigma = self.noise_multiplier
+        rdp_totals: List[float] = []
+        valid_orders: List[float] = []
+        for alpha in orders:
+            if alpha == 1:
+                continue
+            rdp_step = self._rdp_gaussian(alpha, sigma)
+            rdp_subsampled = self._rdp_subsampling(alpha, self.sample_rate, rdp_step)
+            rdp_totals.append(rdp_subsampled * self.steps)
+            valid_orders.append(alpha)
+
+        eps_from_rdp: List[float] = []
+        for alpha, rdp_total_alpha in zip(valid_orders, rdp_totals):
+            eps = rdp_total_alpha + np.log(1 / delta) / (alpha - 1)
+            eps_from_rdp.append(eps)
+
+        return min(eps_from_rdp) if eps_from_rdp else float("inf")
+
+
+@dataclass
+class DPConfig:
+    enabled: bool
+    target_epsilon: float
+    target_delta: float
+    noise_multiplier: float
+    max_grad_norm: float
+    sample_rate: float
+    epsilon_tolerance: float = 0.05
+
+
+class PerSampleGradientClipper:
+    """Per-sample gradient clipping without functorch."""
+
+    def __init__(self, model: nn.Module, max_grad_norm: float):
+        self.model = model
+        self.max_grad_norm = max_grad_norm
+
+    def compute_per_sample_gradients(
+        self,
+        batch_x: torch.Tensor,
+        batch_y: torch.Tensor,
+        edge_indices: Tuple,
+        loss_fn,
+        is_classification: bool = True,
+    ) -> Dict[str, torch.Tensor]:
+        edge_index_adj, edge_index_od, edge_index_od_t = edge_indices
+        all_grads = []
+
+        for i in range(batch_x.shape[0]):
+            self.model.zero_grad(set_to_none=True)
+
+            data = Data(
+                x=batch_x[i],
+                edge_index_adj=edge_index_adj,
+                edge_index_od=edge_index_od,
+                edge_index_od_t=edge_index_od_t,
+            )
+
+            if is_classification:
+                _, node_logits = self.model.forward_classifier(data)
+                target = batch_y[i]
+                loss = loss_fn(node_logits, target)
+            else:
+                _, node_reg = self.model(data)
+                graph_reg = aggregate_node_to_graph(node_reg)
+                graph_target = ensure_graph_level_target(batch_y[i])
+                mask = (graph_target >= 0).float()
+                loss = loss_fn(graph_reg * mask, graph_target * mask)
+
+            loss.backward()
+
+            sample_grads = {}
+            for name, param in self.model.named_parameters():
+                if param.grad is not None and param.requires_grad:
+                    sample_grads[name] = param.grad.clone().detach()
+
+            grad_norm = torch.sqrt(sum(torch.sum(g ** 2) for g in sample_grads.values()))
+            clip_coef = min(1.0, self.max_grad_norm / (grad_norm + 1e-10))
+            clipped_grads = {k: v * clip_coef for k, v in sample_grads.items()}
+            all_grads.append(clipped_grads)
+
+        avg_grads = {}
+        for key in all_grads[0].keys():
+            avg_grads[key] = torch.mean(torch.stack([g[key] for g in all_grads]), dim=0)
+
+        return avg_grads
+
+    def add_noise_to_gradients(
+        self,
+        gradients: Dict[str, torch.Tensor],
+        noise_multiplier: float,
+        batch_size: int,
+    ) -> Dict[str, torch.Tensor]:
+        noisy_grads = {}
+        noise_scale = noise_multiplier * self.max_grad_norm / batch_size
+
+        for key, grad in gradients.items():
+            noise = torch.normal(mean=0.0, std=noise_scale, size=grad.shape, device=grad.device)
+            noisy_grads[key] = grad + noise
+
+        return noisy_grads
+
+
+def aggregate_node_to_graph(node_features: torch.Tensor) -> torch.Tensor:
+    return node_features.mean(dim=0, keepdim=True)
+
+
+def ensure_graph_level_target(target: torch.Tensor) -> torch.Tensor:
+    if target.dim() == 0:
+        return target.unsqueeze(0)
+    if target.dim() == 1:
+        return target.mean(dim=0, keepdim=True)
+    return target.mean(dim=0, keepdim=True)
+
+
+def graph_level_binary_labels(y_cls: torch.Tensor, threshold: float = 0.5) -> torch.Tensor:
+    if y_cls.dim() == 1:
+        graph_vals = y_cls
+    else:
+        reduce_dims = tuple(range(1, y_cls.dim()))
+        graph_vals = y_cls.mean(dim=reduce_dims)
+    return (graph_vals >= threshold).float()
+
+
+def build_balanced_indices(
+    labels: torch.Tensor,
+    desired_pos_fraction: float,
+    total_samples: Optional[int] = None,
+    threshold: float = 0.5,
+) -> torch.Tensor:
+    labels_cpu = labels.detach().cpu()
+    total_samples = total_samples or labels_cpu.shape[0]
+    desired_pos_fraction = float(np.clip(desired_pos_fraction, 1e-3, 0.5))
+
+    graph_labels = graph_level_binary_labels(labels_cpu, threshold)
+    pos_idx = torch.nonzero(graph_labels >= 0.5, as_tuple=False).view(-1)
+    neg_idx = torch.nonzero(graph_labels < 0.5, as_tuple=False).view(-1)
+
+    if len(pos_idx) == 0 or len(neg_idx) == 0:
+        return torch.randperm(labels_cpu.shape[0])
+
+    pos_target = max(1, int(round(total_samples * desired_pos_fraction)))
+    neg_target = max(1, total_samples - pos_target)
+
+    pos_pool = pos_idx[torch.randint(len(pos_idx), (pos_target,))]
+    neg_pool = neg_idx[torch.randint(len(neg_idx), (neg_target,))]
+
+    combined = torch.cat([pos_pool, neg_pool], dim=0)
+    return combined[torch.randperm(len(combined))]
+
+
+def setup_checkpoint_directory() -> str:
+    try:
+        from google.colab import drive
+        from IPython import get_ipython
+        if get_ipython() is not None:
+            drive.mount('/content/drive')
+            base_path = "/content/drive/MyDrive/FlightDelay_Checkpoints"
+        else:
+            base_path = "./checkpoints"
+    except Exception:
+        print("Checkpoints will be saved locally.")
+        base_path = "./checkpoints"
+
+    Path(base_path).mkdir(parents=True, exist_ok=True)
+    return base_path
 
 # Global checkpoint directory
 CHECKPOINT_DIR = ""
@@ -413,7 +602,10 @@ def run_imblearn_comparison(
         ),
         ImblearnMethod(
             name="SMOTEENN",
-            sampler=SMOTEENN(random_state=random_state),
+            sampler=SMOTEENN(
+                random_state=random_state,
+                smote=SMOTE(random_state=random_state),
+            ),
             param_grid={
                 "sampler__smote__k_neighbors": [3, 5, 7],
                 "clf__C": [0.01, 0.1, 1.0, 10.0],
@@ -422,7 +614,10 @@ def run_imblearn_comparison(
         ),
         ImblearnMethod(
             name="SMOTETomek",
-            sampler=SMOTETomek(random_state=random_state),
+            sampler=SMOTETomek(
+                random_state=random_state,
+                smote=SMOTE(random_state=random_state),
+            ),
             param_grid={
                 "sampler__smote__k_neighbors": [3, 5, 7],
                 "clf__C": [0.01, 0.1, 1.0, 10.0],
@@ -496,13 +691,14 @@ def main():
         choices=['mean', 'mean_std'],
         help='Graph->tabular aggregation for --mode imblearn',
     )
+    parser.add_argument('--seed', type=int, default=42, help='Random seed')
     args = parser.parse_args()
 
     # Only the torch training path needs checkpoint setup. The imblearn path is sklearn-only.
     if args.mode == "torch":
         CHECKPOINT_DIR = setup_checkpoint_directory()
     
-    set_seed(42)
+    set_seed(args.seed)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # Load Data
@@ -515,7 +711,7 @@ def main():
     ) = load_flight_data('udata', weather_file='weather2016_2021.npy', data_source='udata')
     
     # Build Sequences (Node Level)
-    horizons = [3, 6, 12]
+    horizons = [12]
     max_horizon = 12
     train_x, _, train_y_cls = build_sequences_node_level(
         train_inputs, train_delay_scaled, train_raw, 8, max_horizon, 5.0, horizons
@@ -530,27 +726,99 @@ def main():
     edge_indices = (edge_index_adj.to(device), edge_index_od.to(device), edge_index_od_t.to(device))
     
     if args.mode == "imblearn":
-        imblearn_results = run_imblearn_comparison(
-            train_x=train_x,
-            train_y_cls=train_y_cls,
-            test_x=test_x,
-            test_y_cls=test_y_cls,
-            class_threshold=args.class_threshold,
-            cv_folds=args.cv_folds,
-            random_state=42,
-            agg=args.imblearn_agg,
-        )
-        print("\n" + "=" * 80)
-        print("IMBLEARN COMPARISON RESULTS (best params per technique)")
-        print("=" * 80)
-        print(f"{'Method':<24} | {'Best CV F1':<10} | {'Test F1':<10}")
-        print("-" * 55)
-        for r in imblearn_results:
-            print(f"{r['name']:<24} | {r['best_cv_f1']:.4f}     | {r['test_f1']:.4f}")
-        print("\nBest params:")
-        for r in imblearn_results:
-            print(f"- {r['name']}: {r['best_params']}")
-        return
+        # Use Stage 1 Classifier instead of Logistic Regression
+        print("\n[INFO] Using Stage 1 Classifier (SequentialTwoStagePredictor) with imblearn samplers")
+        
+        # Flatten for sampling: (N, Nodes, Feat) -> (N, Nodes*Feat)
+        N, Nodes, Feat = train_x.shape
+        x_train_flat = train_x.reshape(N, -1).numpy()
+        y_train_flat = train_y_cls.mean(dim=(1, 2)).numpy() >= 0.5 # Graph-level labels for sampling
+        y_train_flat = y_train_flat.astype(int)
+        
+        # For validation/test, we keep them as tensors for the model
+        # But we need to evaluate on them
+        
+        methods = [
+            ("Baseline (no sampling)", None),
+            ("RandomUnderSampler", RandomUnderSampler(random_state=args.seed, sampling_strategy=0.5)),
+            ("RandomOverSampler", RandomOverSampler(random_state=args.seed, sampling_strategy=0.5)),
+            ("SMOTE", SMOTE(random_state=args.seed, sampling_strategy=0.5)),
+        ]
+        
+        results = []
+        
+        for name, sampler in methods:
+            print(f"\n[Method] {name}")
+            
+            if sampler:
+                print("  Resampling training data...")
+                x_res, y_res = sampler.fit_resample(x_train_flat, y_train_flat)
+                # Reshape back to (N_res, Nodes, Feat)
+                x_res_tensor = torch.tensor(x_res.reshape(-1, Nodes, Feat), dtype=torch.float32)
+                # Reconstruct labels: We only have graph-level labels from sampling.
+                # We need to broadcast them back to nodes or use graph-level training.
+                # Since Stage 1 supports node-level, let's broadcast.
+                y_res_tensor = torch.tensor(y_res, dtype=torch.float32).reshape(-1, 1, 1).expand(-1, Nodes, 1)
+            else:
+                x_res_tensor = train_x
+                y_res_tensor = train_y_cls
+            
+            print(f"  Training samples: {len(x_res_tensor)}")
+            
+            # Initialize fresh model
+            model = SequentialTwoStagePredictor(
+                in_channels=8 * train_inputs.shape[2],
+                out_channels=1, # Dummy
+                hidden_channels=32
+            ).to(device)
+            
+            # Train
+            train_stage1_classifier(
+                model=model,
+                train_x=x_res_tensor,
+                train_y_cls=y_res_tensor,
+                val_x=val_x,
+                val_y_cls=val_y_cls,
+                edge_indices=edge_indices,
+                device=device,
+                epochs=5, # Short training for comparison
+                lr=0.001,
+                pos_weight=1.0, # Balanced by sampling
+                batch_size=32,
+                patience=2
+            )
+            
+            # Evaluate
+            model.eval()
+            with torch.no_grad():
+                val_probs = []
+                val_targets = []
+                for i in range(len(val_x)):
+                    data = Data(
+                        x=val_x[i].to(device),
+                        edge_index_adj=edge_indices[0],
+                        edge_index_od=edge_indices[1],
+                        edge_index_od_t=edge_indices[2],
+                    )
+                    _, logits = model.forward_classifier(data)
+                    # Graph-level aggregation for metric
+                    graph_prob = torch.sigmoid(logits).mean().item()
+                    graph_target = val_y_cls[i].mean().item() >= 0.5
+                    val_probs.append(graph_prob)
+                    val_targets.append(graph_target)
+            
+            metrics = classification_metrics(np.array(val_probs), np.array(val_targets))
+            print(f"  Result: F1={metrics['f1']:.4f}")
+            results.append({'method': name, **metrics})
+            
+        # Print summary
+        print("\n" + "="*40)
+        print("SUMMARY")
+        print("="*40)
+        for r in results:
+            print(f"{r['method']:<25} | F1: {r['f1']:.4f}")
+            
+        return results
 
     # Configurations to test (existing torch mode)
     configs = [
@@ -578,7 +846,7 @@ def main():
             enabled=args.dp,
             target_epsilon=10.0,
             target_delta=1e-5,
-            noise_multiplier=args.noise_multiplier,
+            noise_multiplier=1.0,
             max_grad_norm=1.5,
             sample_rate=args.batch_size / len(train_x),
         )

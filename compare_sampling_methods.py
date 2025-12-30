@@ -731,8 +731,15 @@ def main():
         
         # Flatten for sampling: (N, Nodes, Feat) -> (N, Nodes*Feat)
         N, Nodes, Feat = train_x.shape
-        x_train_flat = train_x.reshape(N, -1).numpy()
-        y_train_flat = train_y_cls.mean(dim=(1, 2)).numpy() >= 0.5 # Graph-level labels for sampling
+        
+        # Combine features and node-level labels for sampling so we preserve node labels
+        # train_x: (N, Nodes, Feat)
+        # train_y_cls: (N, Nodes, 1)
+        train_combined = torch.cat([train_x, train_y_cls], dim=2) # (N, Nodes, Feat+1)
+        x_train_flat = train_combined.reshape(N, -1).numpy() # (N, Nodes*(Feat+1))
+        
+        # Graph-level labels for the sampler to use (target for resampling)
+        y_train_flat = train_y_cls.mean(dim=(1, 2)).numpy() >= 0.5 
         y_train_flat = y_train_flat.astype(int)
         
         # For validation/test, we keep them as tensors for the model
@@ -752,13 +759,18 @@ def main():
             
             if sampler:
                 print("  Resampling training data...")
-                x_res, y_res = sampler.fit_resample(x_train_flat, y_train_flat)
-                # Reshape back to (N_res, Nodes, Feat)
-                x_res_tensor = torch.tensor(x_res.reshape(-1, Nodes, Feat), dtype=torch.float32)
-                # Reconstruct labels: We only have graph-level labels from sampling.
-                # We need to broadcast them back to nodes or use graph-level training.
-                # Since Stage 1 supports node-level, let's broadcast.
-                y_res_tensor = torch.tensor(y_res, dtype=torch.float32).reshape(-1, 1, 1).expand(-1, Nodes, 1)
+                x_res_flat, _ = sampler.fit_resample(x_train_flat, y_train_flat)
+                
+                # Reshape back to (N_res, Nodes, Feat+1)
+                res_tensor = torch.tensor(x_res_flat.reshape(-1, Nodes, Feat + 1), dtype=torch.float32)
+                
+                # Split back into features and labels
+                x_res_tensor = res_tensor[:, :, :-1]
+                y_res_tensor = res_tensor[:, :, -1:]
+                
+                # For SMOTE, the labels might be interpolated. Threshold them.
+                if "SMOTE" in name:
+                    y_res_tensor = (y_res_tensor > 0.5).float()
             else:
                 x_res_tensor = train_x
                 y_res_tensor = train_y_cls

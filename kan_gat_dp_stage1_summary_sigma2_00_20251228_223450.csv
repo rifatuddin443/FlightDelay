@@ -1,0 +1,15 @@
+metric,value
+classification_precision,0.38093492208912755
+classification_recall,0.997599615933761
+classification_f1,0.5513398739507849
+classification_accuracy,0.38217025940741295
+target_epsilon,15.0
+final_epsilon,3.553157609067398
+epsilon_exceeded,False
+epsilon_overshoot,0
+final_delta,1e-05
+stage1_time_seconds,376.0135884284973
+stage1_time_minutes,6.266893140474955
+train_samples,12730
+val_samples,2727
+test_samples,5474

@@ -50,6 +50,17 @@ from classifykat import (  # noqa: E402
 from classifykat_balanced import build_sequences_node_level  # noqa: E402
 from baseline_methods import test_error  # noqa: E402
 
+# Import visualization functions
+try:
+    from visualize_training_classification import (
+        visualize_training_data,
+        visualize_classification_results
+    )
+    VISUALIZATION_AVAILABLE = True
+except ImportError:
+    print("Warning: visualize_training_classification not found. Visualizations will be skipped.")
+    VISUALIZATION_AVAILABLE = False
+
 
 class GraphSequenceData(Data):
     """Custom PyG data object with multiple edge indices."""
@@ -204,15 +215,13 @@ class PerSampleGradientClipper:
             
             if is_classification:
                 _, node_logits = self.model.forward_classifier(data)
-                graph_logit = aggregate_node_to_graph(node_logits)
-                graph_target = ensure_graph_level_target(batch_y[i])
-                loss = loss_fn(graph_logit, graph_target)
+                # REMOVED AGGREGATION: Use node-level logits and targets directly
+                loss = loss_fn(node_logits, batch_y[i])
             else:
                 _, node_reg = self.model(data)
-                graph_reg = aggregate_node_to_graph(node_reg)
-                graph_target = ensure_graph_level_target(batch_y[i])
-                mask = (graph_target >= 0).float()
-                loss = loss_fn(graph_reg * mask, graph_target * mask)
+                # REMOVED AGGREGATION: Use node-level regression
+                mask = (batch_y[i] >= 0).float()
+                loss = loss_fn(node_reg * mask, batch_y[i] * mask)
             
             loss.backward()
             
@@ -377,10 +386,9 @@ def train_stage1_with_dp(
                             edge_index_od_t=edge_indices[2],
                         )
                         _, node_logits = model.forward_classifier(data.to(device))
-                        graph_logit = aggregate_node_to_graph(node_logits)
-                        graph_target = ensure_graph_level_target(batch_y[i])
-                        logits_list.append(graph_logit)
-                        targets_list.append(graph_target)
+                        # REMOVED AGGREGATION
+                        logits_list.append(node_logits)
+                        targets_list.append(batch_y[i])
                     all_logits = torch.cat(logits_list, dim=0)
                     all_targets = torch.cat(targets_list, dim=0)
                     loss = cls_loss_fn(all_logits, all_targets)
@@ -398,10 +406,9 @@ def train_stage1_with_dp(
                         edge_index_od_t=edge_indices[2],
                     )
                     _, node_logits = model.forward_classifier(data.to(device))
-                    graph_logit = aggregate_node_to_graph(node_logits)
-                    graph_target = ensure_graph_level_target(batch_y[i])
-                    logits_list.append(graph_logit)
-                    targets_list.append(graph_target)
+                    # REMOVED AGGREGATION
+                    logits_list.append(node_logits)
+                    targets_list.append(batch_y[i])
                 all_logits = torch.cat(logits_list, dim=0)
                 all_targets = torch.cat(targets_list, dim=0)
                 loss = cls_loss_fn(all_logits, all_targets)
@@ -422,10 +429,9 @@ def train_stage1_with_dp(
                     edge_index_od_t=edge_indices[2],
                 )
                 _, node_logits = model.forward_classifier(data)
-                graph_logit = aggregate_node_to_graph(node_logits)
-                graph_target = ensure_graph_level_target(val_y_cls[i])
-                val_probs.append(torch.sigmoid(graph_logit).cpu())
-                val_targets.append(graph_target.cpu())
+                # REMOVED AGGREGATION
+                val_probs.append(torch.sigmoid(node_logits).cpu())
+                val_targets.append(val_y_cls[i].cpu())
         
         val_probs_np = torch.cat(val_probs).numpy()
         val_targets_np = torch.cat(val_targets).numpy()
@@ -595,17 +601,16 @@ def train_stage2_with_dp(
                             edge_index_od_t=edge_indices[2],
                         )
                         _, node_reg = model(data.to(device))
-                        graph_reg = aggregate_node_to_graph(node_reg)
-                        graph_target = ensure_graph_level_target(batch_y_reg[i])
-                        reg_preds.append(graph_reg)
-                        reg_targets.append(graph_target)
+                        # REMOVED AGGREGATION
+                        reg_preds.append(node_reg)
+                        reg_targets.append(batch_y_reg[i])
                     reg_preds = torch.cat(reg_preds, dim=0)
                     reg_targets = torch.cat(reg_targets, dim=0)
                     
                     cls_mask = []
                     for i in range(len(batch_y_cls)):
-                        graph_cls = ensure_graph_level_target(batch_y_cls[i])
-                        cls_mask.append(graph_cls)
+                        # REMOVED AGGREGATION
+                        cls_mask.append(batch_y_cls[i])
                     cls_mask = torch.cat(cls_mask, dim=0)
                     mask = (cls_mask >= class_threshold).float()
                     if mask.dim() == 1:
@@ -625,17 +630,16 @@ def train_stage2_with_dp(
                         edge_index_od_t=edge_indices[2],
                     )
                     _, node_reg = model(data.to(device))
-                    graph_reg = aggregate_node_to_graph(node_reg)
-                    graph_target = ensure_graph_level_target(batch_y_reg[i])
-                    reg_preds.append(graph_reg)
-                    reg_targets.append(graph_target)
+                    # REMOVED AGGREGATION
+                    reg_preds.append(node_reg)
+                    reg_targets.append(batch_y_reg[i])
                 reg_preds = torch.cat(reg_preds, dim=0)
                 reg_targets = torch.cat(reg_targets, dim=0)
                 
                 cls_mask = []
                 for i in range(len(batch_y_cls)):
-                    graph_cls = ensure_graph_level_target(batch_y_cls[i])
-                    cls_mask.append(graph_cls)
+                    # REMOVED AGGREGATION
+                    cls_mask.append(batch_y_cls[i])
                 cls_mask = torch.cat(cls_mask, dim=0)
                 mask = (cls_mask >= class_threshold).float()
                 if mask.dim() == 1:
@@ -659,15 +663,13 @@ def train_stage2_with_dp(
                     edge_index_od_t=edge_indices[2],
                 )
                 _, node_reg = model(data)
-                graph_reg = aggregate_node_to_graph(node_reg)
-                graph_target = ensure_graph_level_target(val_y_reg[i])
-                graph_cls = ensure_graph_level_target(val_y_cls[i])
+                # REMOVED AGGREGATION
                 
-                mask = (graph_cls >= class_threshold).float()
+                mask = (val_y_cls[i] >= class_threshold).float()
                 if mask.dim() == 1:
                     mask = mask.unsqueeze(-1)
                 
-                loss = reg_loss_fn(graph_reg.cpu() * mask, graph_target * mask)
+                loss = reg_loss_fn(node_reg.cpu() * mask, val_y_reg[i] * mask)
                 val_losses.append(loss.item())
         
         val_loss = np.mean(val_losses)
@@ -789,12 +791,32 @@ def train_stage3_with_dp(
 
     # Check if checkpoint exists to resume
     if checkpoint_path and os.path.exists(checkpoint_path):
-        start_epoch, _ = load_checkpoint(model, optimizer, checkpoint_path)
+        # Load checkpoint to check epoch and adjust optimizer if needed
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        start_epoch = checkpoint['epoch']
+        
+        # If resuming from a state where encoder was already unfrozen,
+        # we must re-initialize the optimizer with the correct parameter groups
+        if start_epoch >= unfreeze_epoch:
+            print(f"  → Resuming from epoch {start_epoch} (Encoder already unfrozen)")
+            for param in model.encoder.parameters():
+                param.requires_grad = True
+            optimizer = torch.optim.Adam(
+                [
+                    {"params": model.encoder.parameters(), "lr": lr * 0.001},
+                    {"params": model.regressor.parameters(), "lr": lr * 0.01},
+                ],
+                weight_decay=1e-5,
+            )
+            
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         print(f"Resuming Stage 3 from epoch {start_epoch}")
 
     for epoch in range(start_epoch, epochs + 1):
         # Progressive unfreezing of encoder
-        if epoch == unfreeze_epoch:
+        # Only unfreeze if we haven't already done so (checked via start_epoch)
+        if epoch == unfreeze_epoch and start_epoch != unfreeze_epoch:
             print("  → Unfreezing encoder with very low LR...")
             for param in model.encoder.parameters():
                 param.requires_grad = True
@@ -824,7 +846,7 @@ def train_stage3_with_dp(
 
             optimizer.zero_grad(set_to_none=True)
 
-            # Forward pass: collect graph-level predictions/targets for batch
+            # Forward pass: collect node-level predictions/targets for batch
             reg_preds: List[torch.Tensor] = []
             reg_targets: List[torch.Tensor] = []
             for i in range(len(batch_x)):
@@ -835,12 +857,11 @@ def train_stage3_with_dp(
                     edge_index_od_t=edge_indices[2],
                 )
                 _, node_reg = model(data.to(device))
-                graph_reg = aggregate_node_to_graph(node_reg)
-                graph_target = ensure_graph_level_target(batch_y_reg[i])
-                reg_preds.append(graph_reg)
-                reg_targets.append(graph_target)
+                # REMOVED AGGREGATION
+                reg_preds.append(node_reg)
+                reg_targets.append(batch_y_reg[i])
 
-            reg_preds_t = torch.cat(reg_preds, dim=0)  # [B, out_channels]
+            reg_preds_t = torch.cat(reg_preds, dim=0)  # [B * N, out_channels]
             reg_targets_t = torch.cat(reg_targets, dim=0)
 
             # Denormalize targets (detached) ONLY for mask creation
@@ -898,19 +919,18 @@ def train_stage3_with_dp(
                     edge_index_od_t=edge_indices[2],
                 )
                 _, node_reg = model(data)
-                graph_reg = aggregate_node_to_graph(node_reg)
-                graph_target = ensure_graph_level_target(val_y_reg[i])
+                # REMOVED AGGREGATION
 
                 if scaler is not None:
                     target_denorm = torch.from_numpy(
-                        scaler.inverse_transform(graph_target.cpu().numpy())
+                        scaler.inverse_transform(val_y_reg[i].cpu().numpy())
                     ).to(device)
                     pred_denorm = torch.from_numpy(
-                        scaler.inverse_transform(graph_reg.cpu().numpy())
+                        scaler.inverse_transform(node_reg.cpu().numpy())
                     ).to(device)
                 else:
-                    target_denorm = graph_target
-                    pred_denorm = graph_reg
+                    target_denorm = val_y_reg[i]
+                    pred_denorm = node_reg
 
                 element_mask = (target_denorm.abs() < delay_threshold).float()
                 num_nondelayed = element_mask.sum()
@@ -1009,6 +1029,7 @@ def final_evaluation(
     test_y_reg: torch.Tensor,
     test_y_cls: torch.Tensor,
     class_threshold: float,
+    delay_threshold: float,
     model_path: str,
     histories: List[Dict],
     final_epsilon: float,
@@ -1063,16 +1084,12 @@ def final_evaluation(
             )
             
             node_logits, node_reg = model(data)
-            graph_logit = aggregate_node_to_graph(node_logits)
-            graph_reg = aggregate_node_to_graph(node_reg)
+            # REMOVED AGGREGATION
             
-            graph_cls_target = ensure_graph_level_target(test_y_cls[i])
-            graph_reg_target = ensure_graph_level_target(test_y_reg[i])
-            
-            logits_list.append(torch.sigmoid(graph_logit).cpu().numpy())
-            reg_list.append(graph_reg.cpu().numpy())
-            targets_cls_list.append(graph_cls_target.cpu().numpy())
-            targets_reg_list.append(graph_reg_target.cpu().numpy())
+            logits_list.append(torch.sigmoid(node_logits).cpu().numpy())
+            reg_list.append(node_reg.cpu().numpy())
+            targets_cls_list.append(test_y_cls[i].cpu().numpy())
+            targets_reg_list.append(test_y_reg[i].cpu().numpy())
             
             if (i + 1) % 1000 == 0 or (i + 1) == len(test_x):
                 print(f"  Processed {i+1}/{len(test_x)} samples...")
@@ -1099,8 +1116,12 @@ def final_evaluation(
         preds_denorm = gated_preds
         targets_denorm = test_reg_targets
     
-    # Evaluate on delayed flights
-    delayed_mask = test_cls_targets.flatten() >= class_threshold
+    # Treat negative values as on time (0 min)
+    preds_denorm = np.maximum(0, preds_denorm)
+    targets_denorm = np.maximum(0, targets_denorm)
+    
+    # Evaluate on delayed flights (Actual >= Threshold)
+    delayed_mask = targets_denorm.flatten() >= delay_threshold
     if delayed_mask.sum() > 0:
         delayed_preds = preds_denorm[delayed_mask]
         delayed_targets = targets_denorm[delayed_mask]
@@ -1109,8 +1130,8 @@ def final_evaluation(
     else:
         mae_delayed, rmse_delayed = 0.0, 0.0
     
-    # Evaluate on non-delayed flights
-    nondelayed_mask = test_cls_targets.flatten() < class_threshold
+    # Evaluate on non-delayed flights (1 min <= Actual < Threshold)
+    nondelayed_mask = (targets_denorm.flatten() >= 1.0) & (targets_denorm.flatten() < delay_threshold)
     if nondelayed_mask.sum() > 0:
         nondelayed_preds = preds_denorm[nondelayed_mask]
         nondelayed_targets = targets_denorm[nondelayed_mask]
@@ -1127,16 +1148,44 @@ def final_evaluation(
     print(f"  Precision: {test_cls_metrics['precision']:.4f} | Recall: {test_cls_metrics['recall']:.4f}")
     print(f"  F1: {test_cls_metrics['f1']:.4f} | Accuracy: {test_cls_metrics['accuracy']:.4f}")
     
-    print("\nREGRESSION (delayed flights only):")
+    print(f"\nREGRESSION (delayed flights >= {delay_threshold} min):")
     print(f"  MAE: {mae_delayed:.4f} min | RMSE: {rmse_delayed:.4f} min")
     print(f"  Number of delayed samples: {delayed_mask.sum()}")
     
-    print("\nREGRESSION (non-delayed flights only):")
+    print(f"\nREGRESSION (non-delayed flights 1-{delay_threshold} min):")
     print(f"  MAE: {mae_nondelayed:.4f} min | RMSE: {rmse_nondelayed:.4f} min")
     print(f"  Number of non-delayed samples: {nondelayed_mask.sum()}")
     
     print("\nREGRESSION (overall):")
     print(f"  MAE: {mae_overall:.4f} min | RMSE: {rmse_overall:.4f} min")
+    
+    # Visualize classification results
+    if VISUALIZATION_AVAILABLE:
+        print("\n[VISUALIZATION] Generating classification results plots...")
+        try:
+            # Convert predictions to binary labels
+            test_cls_pred = (test_probs >= class_threshold).astype(int).flatten()
+            test_cls_true = test_cls_targets.flatten()
+            
+            # Handle multi-dimensional regression targets (take first channel/delay)
+            if targets_denorm.ndim > 1 and targets_denorm.shape[1] > 1:
+                test_reg_true = targets_denorm[:, 0].flatten()
+                test_reg_pred = preds_denorm[:, 0].flatten()
+            else:
+                test_reg_true = targets_denorm.flatten()
+                test_reg_pred = preds_denorm.flatten()
+            
+            visualize_classification_results(
+                test_cls_true,
+                test_cls_pred,
+                test_reg_true,
+                test_reg_pred,
+                threshold=class_threshold,
+                save_path=f"classification_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            )
+            print("  ✓ Classification results visualization saved")
+        except Exception as e:
+            print(f"  ✗ Error generating classification results visualization: {e}")
     
     print("\nPRIVACY BUDGET:")
     print(f"  Target ε: {dp_config.target_epsilon:.3f}")
@@ -1286,9 +1335,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--use_node_level', action='store_true', default=True, help='Use node-level labels')
     parser.add_argument('--weather_file', type=str, default='weather_cn.npy')
     parser.add_argument('--period_hours', type=int, default=24)
-    parser.add_argument('--stage1_epochs', type=int, default=2)
-    parser.add_argument('--stage2_epochs', type=int, default=2)
-    parser.add_argument('--stage3_epochs', type=int, default=2, help='Epochs for non-delayed regressor')
+    parser.add_argument('--stage1_epochs', type=int, default=6)
+    parser.add_argument('--stage2_epochs', type=int, default=6)
+    parser.add_argument('--stage3_epochs', type=int, default=6, help='Epochs for non-delayed regressor')
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--patience', type=int, default=5)
@@ -1301,7 +1350,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--epsilon_tolerance', type=float, default=0.05)
     parser.add_argument('--model_path', type=str, default='kan_gat_dp_three_stage.pth')
     parser.add_argument('--seed', type=int, default=None, help='Random seed (None for random)')
-    parser.add_argument('--balance_50_50', action='store_true', default=True, help='Apply random undersampling to achieve 50-50 class balance')
+    parser.add_argument('--balance_50_50', action='store_true', default=False, help='Apply random undersampling to achieve 50-50 class balance')
     return parser.parse_args()
 
 
@@ -1409,6 +1458,39 @@ def main() -> None:
     print(f"  Val: {val_y_cls.mean().item():.2%} delayed")
     print(f"  Test: {test_y_cls.mean().item():.2%} delayed")
     
+    # Visualize training data distribution
+    if VISUALIZATION_AVAILABLE:
+        print("\n[VISUALIZATION] Generating training data distribution plots...")
+        try:
+            # Prepare data for visualization (convert to numpy)
+            train_x_viz = train_x.cpu().numpy() if isinstance(train_x, torch.Tensor) else train_x
+            train_y_cls_viz = train_y_cls.cpu().numpy() if isinstance(train_y_cls, torch.Tensor) else train_y_cls
+            train_y_reg_viz = train_y_reg.cpu().numpy() if isinstance(train_y_reg, torch.Tensor) else train_y_reg
+            
+            # If data is in normalized form, denormalize regression targets for visualization
+            if scaler is not None:
+                train_y_reg_denorm = scaler.inverse_transform(
+                    train_y_reg_viz.reshape(-1, train_y_reg_viz.shape[-1])
+                ).reshape(train_y_reg_viz.shape)
+            else:
+                train_y_reg_denorm = train_y_reg_viz
+            
+            # Flatten classification labels for visualization
+            train_y_cls_flat = train_y_cls_viz.mean(axis=(1, 2)) if train_y_cls_viz.ndim > 1 else train_y_cls_viz
+            train_y_reg_flat = train_y_reg_denorm.mean(axis=(1, 2)) if train_y_reg_denorm.ndim > 1 else train_y_reg_denorm
+            
+            visualize_training_data(
+                train_x_viz,
+                train_y_cls_flat,
+                train_y_reg_flat,
+                threshold=args.delay_threshold,
+                sample_size=min(2000, len(train_x_viz)),
+                save_path=f"training_data_visualization_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            )
+            print("  ✓ Training data visualization saved")
+        except Exception as e:
+            print(f"  ✗ Error generating training data visualization: {e}")
+    
     edge_indices = (
         edge_index_adj.to(device),
         edge_index_od.to(device),
@@ -1497,7 +1579,7 @@ def main() -> None:
     final_evaluation(
         model, edge_indices, device, scaler, horizons,
         delay_dim, num_nodes, test_x, test_y_reg, test_y_cls,
-        args.class_threshold, args.model_path, combined_history,
+        args.class_threshold, args.delay_threshold, args.model_path, combined_history,
         final_epsilon, final_delta, stage1_time, stage2_time, stage3_time,
         len(train_x), len(val_x), dp_config,
     )

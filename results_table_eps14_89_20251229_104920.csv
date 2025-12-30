@@ -1,0 +1,49 @@
+================================================================================
+COMPREHENSIVE EVALUATION RESULTS
+================================================================================
+
+MODEL INFORMATION
+Model Path,kan_gat_dp_three_stage_sigma2_00_20251229_044244.pth
+Model Type,Three-Stage DP
+Data Source,cdata
+Sequence Length,8
+Delay Threshold,5.0 min
+Classification Threshold,0.5
+Final Epsilon,14.888
+Target Epsilon,15.000
+Final Delta,1.00e-05
+Epsilon Exceeded,False
+
+================================================================================
+CLASSIFICATION METRICS
+================================================================================
+Metric,Value
+Precision,0.4511
+Recall,0.0011
+F1 Score,0.0022
+Accuracy,0.6432
+
+================================================================================
+OVERALL SUMMARY TABLE
+================================================================================
+Epsilon,Overall MAE (min),12-step Arrival,12-step Departure,Precision,Recall,F1 Score,Accuracy
+14.89,4.2816,4.5831,3.9800,0.4511,0.0011,0.0022,0.6432
+
+================================================================================
+DETAILED METRICS - DELAYED FLIGHTS (>5 min)
+================================================================================
+Horizon,Samples,Arrival MAE,Arrival RMSE,Arrival R2,Departure MAE,Departure RMSE,Departure R2,Mean Arr Pred,Mean Arr Target,Mean Dep Pred,Mean Dep Target
+12-step,97640,10.8348,14.0298,-0.9755,9.1332,12.8554,-0.6728,2.95,12.81,2.95,11.11
+
+================================================================================
+DETAILED METRICS - NON-DELAYED FLIGHTS (<5 min)
+================================================================================
+Horizon,Samples,Arrival MAE,Arrival RMSE,Arrival R2,Departure MAE,Departure RMSE,Departure R2,Mean Arr Pred,Mean Arr Target,Mean Dep Pred,Mean Dep Target
+12-step,137069,0.5997,1.2770,-0.2130,0.6070,1.2953,-0.2233,2.95,2.42,2.95,2.40
+
+================================================================================
+DETAILED METRICS - ALL FLIGHTS (OVERALL)
+================================================================================
+Horizon,Samples,Arrival MAE,Arrival RMSE,Arrival R2,Departure MAE,Departure RMSE,Departure R2,Mean Arr Pred,Mean Arr Target,Mean Dep Pred,Mean Dep Target
+12-step,273700,4.5831,8.5007,-0.1249,3.9800,7.8117,-0.0873,2.95,5.78,2.95,5.17
+

@@ -62,22 +62,26 @@ def build_sequences_balanced(
         # FIX: Different aggregation strategies (only positive delays count)
         if aggregation == 'mean':
             # Graph is delayed if AVERAGE delay across all nodes >= threshold
-            avg_delay = np.mean(raw_target, axis=(0, 1, 2))
+            # Separate classification for each feature
+            avg_delay = np.mean(raw_target, axis=(0, 1)) # [num_features]
             cls_flag = (avg_delay >= delay_threshold).astype(np.float32)
             # Replicate to all nodes for consistency
-            cls_flag = np.full((num_nodes, 1), cls_flag)
+            cls_flag = np.tile(cls_flag, (num_nodes, 1))
             
         elif aggregation == 'any':
             # Graph is delayed if >50% of nodes are delayed
-            node_delays = np.max(raw_target, axis=(1, 2))  # [num_nodes]
+            # Separate classification for each feature
+            node_delays = np.max(raw_target, axis=1)  # [num_nodes, num_features]
             delayed_nodes = (node_delays >= delay_threshold).astype(np.float32)
-            graph_delayed = (delayed_nodes.mean() > 0.5).astype(np.float32)
-            cls_flag = np.full((num_nodes, 1), graph_delayed)
+            graph_delayed = (delayed_nodes.mean(axis=0) > 0.5).astype(np.float32) # [num_features]
+            cls_flag = np.tile(graph_delayed, (num_nodes, 1))
             
         else:  # 'max' - original behavior
             # Graph is delayed if ANY node has delay >= threshold
-            cls_flag = (np.max(raw_target, axis=(1, 2)) >= delay_threshold).astype(np.float32)
-            cls_flag = cls_flag.reshape(num_nodes, 1)
+            # Separate classification for each feature
+            node_delays = np.max(raw_target, axis=1) # [num_nodes, num_features]
+            cls_flag = (node_delays >= delay_threshold).astype(np.float32)
+            # cls_flag is [num_nodes, num_features]
 
         x_list.append(x_seq)
         y_reg_list.append(y_seq)
@@ -121,15 +125,18 @@ def build_sequences_node_level(
         future_scaled = target_scaled[:, t + seq_len:t + seq_len + horizon, :]
         future_scaled = future_scaled[:, horizon_ids, :]
         y_seq = future_scaled.reshape(num_nodes, -1)
-
-        raw_target = raw[:, t + seq_len:t + seq_len + horizon, :]
-        raw_target = np.nan_to_num(raw_target[:, horizon_ids, :])
+        #y seq is scalaed target at 11th time step (for horizon=12) and raw target is unscaled target at 11th time step (for horizon=12)
+        
+        raw_target = raw[:, t + seq_len:t + seq_len + horizon, :]#future unscaled target
+        raw_target = np.nan_to_num(raw_target[:, horizon_ids, :]) #just the target at 11
         
         # FIX: Per-node classification (preserves true distribution)
         # Each node labeled independently based on its own delay (only positive delays)
-        node_delays = np.max(raw_target, axis=(1, 2))  # [num_nodes]
+        # Separate classification for each feature (e.g., arrival and departure)
+        # Take max over horizon per feature (keeps arrival vs. departure separate)
+        node_delays = np.max(raw_target, axis=1)  # [num_nodes, num_features]
         cls_flag = (node_delays >= delay_threshold).astype(np.float32)
-        cls_flag = cls_flag.reshape(num_nodes, 1)
+        # cls_flag is now [num_nodes, num_features]
 
         x_list.append(x_seq)
         y_reg_list.append(y_seq)
@@ -144,7 +151,7 @@ def build_sequences_node_level(
     # Print actual balance
     cls_tensor = tensors[2]
     delayed_rate = cls_tensor.mean().item()
-    print(f"\nNode-level balance: {delayed_rate:.2%} delayed (should be ~22%)")
+    print(f"\nNode-level balance: {delayed_rate:.2%} delayed ")
     
     return tensors
 

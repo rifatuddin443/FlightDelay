@@ -23,7 +23,6 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
-import torch.nn.functional as F
 from torch.func import grad, vmap, functional_call
 from torch.utils.data import Dataset
 from torch_geometric.data import Data
@@ -78,6 +77,7 @@ class GraphSequenceDataset(Dataset):
         features: torch.Tensor,
         y_reg: torch.Tensor,
         y_cls: torch.Tensor,
+        mask: torch.Tensor,
         edge_index_adj: torch.Tensor,
         edge_index_od: torch.Tensor,
         edge_index_od_t: torch.Tensor,
@@ -85,6 +85,7 @@ class GraphSequenceDataset(Dataset):
         self.features = features.clone()
         self.y_reg = y_reg.clone()
         self.y_cls = y_cls.clone()
+        self.mask = mask.clone()
         self.edge_index_adj = edge_index_adj.clone().long()
         self.edge_index_od = edge_index_od.clone().long()
         self.edge_index_od_t = edge_index_od_t.clone().long()
@@ -99,6 +100,7 @@ class GraphSequenceDataset(Dataset):
         data.num_nodes = feat.shape[0]
         data.y_cls = self.y_cls[idx]
         data.y_reg = self.y_reg[idx]
+        data.mask = self.mask[idx]
         data.edge_index_adj = self.edge_index_adj
         data.edge_index_od = self.edge_index_od
         data.edge_index_od_t = self.edge_index_od_t
@@ -186,86 +188,6 @@ class DPConfig:
     epsilon_tolerance: float = 0.05
 
 
-class FocalLoss(nn.Module):
-    """Binary focal loss with logits for multi-channel targets."""
-
-    def __init__(self, alpha: Optional[torch.Tensor] = None, gamma: float = 2.0, reduction: str = "mean"):
-        super().__init__()
-        self.alpha = alpha
-        self.gamma = gamma
-        self.reduction = reduction
-
-    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        targets = targets.float()
-        # Standard BCE with logits per element
-        bce = F.binary_cross_entropy_with_logits(logits, targets, reduction="none")
-        # p_t is the model-assigned probability of the true class
-        probs = torch.sigmoid(logits)
-        p_t = probs * targets + (1 - probs) * (1 - targets)
-        focal_factor = (1 - p_t).pow(self.gamma)
-        loss = focal_factor * bce
-
-        if self.alpha is not None:
-            alpha_t = self.alpha.to(logits.device)
-            # Apply alpha only to positives; keep negatives at weight 1.0
-            alpha_factor = alpha_t * targets + (1.0 - targets)
-            loss = alpha_factor * loss
-
-        if self.reduction == "mean":
-            return loss.mean()
-        if self.reduction == "sum":
-            return loss.sum()
-        return loss
-
-
-def classification_metrics_per_channel(
-    preds: np.ndarray,
-    targets: np.ndarray,
-    channel_names: Tuple[str, ...] = ("arrival", "departure"),
-) -> Dict[str, float]:
-    """Compute precision/recall/F1/accuracy per output channel.
-
-    Expects preds/targets shaped [N, C] (or any shape that can be reshaped to [-1, C]).
-    Returns both per-channel metrics and macro-averaged metrics.
-    """
-    preds_2d = preds.reshape(-1, preds.shape[-1])
-    targets_2d = targets.reshape(-1, targets.shape[-1])
-    n_channels = preds_2d.shape[1]
-
-    metrics: Dict[str, float] = {}
-    precisions, recalls, f1s, accuracies = [], [], [], []
-    for c in range(n_channels):
-        preds_bin = preds_2d[:, c] >= 0.5
-        targets_bin = targets_2d[:, c] >= 0.5
-
-        tp = np.logical_and(preds_bin, targets_bin).sum()
-        fp = np.logical_and(preds_bin, ~targets_bin).sum()
-        fn = np.logical_and(~preds_bin, targets_bin).sum()
-        tn = np.logical_and(~preds_bin, ~targets_bin).sum()
-
-        precision = float(tp / (tp + fp + 1e-8))
-        recall = float(tp / (tp + fn + 1e-8))
-        f1 = float(2 * precision * recall / (precision + recall + 1e-8))
-        accuracy = float((tp + tn) / (tp + tn + fp + fn + 1e-8))
-
-        name = channel_names[c] if c < len(channel_names) else f"ch{c}"
-        metrics[f"precision_{name}"] = precision
-        metrics[f"recall_{name}"] = recall
-        metrics[f"f1_{name}"] = f1
-        metrics[f"accuracy_{name}"] = accuracy
-
-        precisions.append(precision)
-        recalls.append(recall)
-        f1s.append(f1)
-        accuracies.append(accuracy)
-
-    metrics["precision"] = float(np.mean(precisions)) if precisions else 0.0
-    metrics["recall"] = float(np.mean(recalls)) if recalls else 0.0
-    metrics["f1"] = float(np.mean(f1s)) if f1s else 0.0
-    metrics["accuracy"] = float(np.mean(accuracies)) if accuracies else 0.0
-    return metrics
-
-
 class PerSampleGradientClipper:
     """Per-sample gradient clipping - simplified approach without functorch."""
     def __init__(self, model: nn.Module, max_grad_norm: float):
@@ -276,6 +198,7 @@ class PerSampleGradientClipper:
         self,
         batch_x: torch.Tensor,
         batch_y: torch.Tensor,
+        batch_mask: Optional[torch.Tensor],
         edge_indices: Tuple,
         loss_fn,
         is_classification: bool = True,
@@ -298,11 +221,28 @@ class PerSampleGradientClipper:
                 _, node_logits = self.model.forward_classifier(data)
                 # REMOVED AGGREGATION: Use node-level logits and targets directly
                 loss = loss_fn(node_logits, batch_y[i])
+                
+                if batch_mask is not None:
+                    # Derive node mask: 1 if any feature is valid
+                    node_mask = (batch_mask[i].sum(dim=1, keepdim=True) > 0).float()
+                    loss = loss * node_mask
+                    loss = loss.sum() / (node_mask.sum() + 1e-6)
+                else:
+                    loss = loss.mean()
+                    
             else:
                 _, node_reg = self.model(data)
                 # REMOVED AGGREGATION: Use node-level regression
-                mask = (batch_y[i] >= 0).float()
-                loss = loss_fn(node_reg * mask, batch_y[i] * mask)
+                
+                if batch_mask is not None:
+                    mask = batch_mask[i]
+                else:
+                    mask = (batch_y[i] != 0).float() # Fallback
+                
+                # loss_fn expected to be reduction='none'
+                loss = loss_fn(node_reg, batch_y[i])
+                loss = loss * mask
+                loss = loss.sum() / (mask.sum() + 1e-6)
             
             loss.backward()
             
@@ -370,13 +310,15 @@ def train_stage1_with_dp(
     model: SequentialTwoStagePredictor,
     train_x: torch.Tensor,
     train_y_cls: torch.Tensor,
+    train_mask: torch.Tensor,
     val_x: torch.Tensor,
     val_y_cls: torch.Tensor,
+    val_mask: torch.Tensor,
     edge_indices: Tuple,
     device: torch.device,
     epochs: int,
     lr: float,
-    pos_weight: torch.Tensor,
+    pos_weight: float,
     patience: int,
     dp_config: DPConfig,
     batch_size: int,
@@ -394,17 +336,9 @@ def train_stage1_with_dp(
     
     trainable_params = list(model.encoder.parameters()) + list(model.classifier.parameters())
     optimizer = torch.optim.Adam(trainable_params, lr=lr, weight_decay=1e-4)
-    
-    # Ensure pos_weight is on the correct device
-    if isinstance(pos_weight, (float, int)):
-        pos_weight_t = torch.tensor([pos_weight], device=device)
-    else:
-        pos_weight_t = pos_weight.to(device)
-        
-    cls_loss_fn = FocalLoss(
-        alpha=pos_weight_t,
-        gamma=2.0,
-        reduction="mean",
+    cls_loss_fn = nn.BCEWithLogitsLoss(
+        pos_weight=torch.tensor([pos_weight], device=device),
+        reduction='none'
     )
     
     accountant = RDPAccountant(
@@ -447,13 +381,14 @@ def train_stage1_with_dp(
             batch_indices = indices[start_idx:end_idx]
             batch_x = train_x[batch_indices].to(device)
             batch_y = train_y_cls[batch_indices].to(device)
+            batch_mask = train_mask[batch_indices].to(device)
             
             optimizer.zero_grad(set_to_none=True)
             
             if dp_config.enabled:
                 # DP-SGD
                 per_sample_grads = clipper.compute_per_sample_gradients(
-                    batch_x, batch_y, edge_indices, cls_loss_fn, is_classification=True
+                    batch_x, batch_y, batch_mask, edge_indices, cls_loss_fn, is_classification=True
                 )
                 noisy_grads = clipper.add_noise_to_gradients(
                     per_sample_grads,
@@ -464,10 +399,11 @@ def train_stage1_with_dp(
                     if param.requires_grad and name in noisy_grads:
                         param.grad = noisy_grads[name]
                 
-                # Loss for logging
+                # Loss for logging (approximate)
                 with torch.no_grad():
                     logits_list = []
                     targets_list = []
+                    mask_list = []
                     for i in range(len(batch_x)):
                         data = Data(
                             x=batch_x[i],
@@ -476,18 +412,24 @@ def train_stage1_with_dp(
                             edge_index_od_t=edge_indices[2],
                         )
                         _, node_logits = model.forward_classifier(data.to(device))
-                        # REMOVED AGGREGATION
                         logits_list.append(node_logits)
                         targets_list.append(batch_y[i])
+                        mask_list.append(batch_mask[i])
+                    
                     all_logits = torch.cat(logits_list, dim=0)
                     all_targets = torch.cat(targets_list, dim=0)
+                    all_mask = torch.cat(mask_list, dim=0)
+                    
                     loss = cls_loss_fn(all_logits, all_targets)
+                    node_mask = (all_mask.sum(dim=1, keepdim=True) > 0).float()
+                    loss = (loss * node_mask).sum() / (node_mask.sum() + 1e-6)
                 
                 accountant.step()
             else:
                 # Standard training
                 logits_list = []
                 targets_list = []
+                mask_list = []
                 for i in range(len(batch_x)):
                     data = Data(
                         x=batch_x[i],
@@ -496,12 +438,18 @@ def train_stage1_with_dp(
                         edge_index_od_t=edge_indices[2],
                     )
                     _, node_logits = model.forward_classifier(data.to(device))
-                    # REMOVED AGGREGATION
                     logits_list.append(node_logits)
                     targets_list.append(batch_y[i])
+                    mask_list.append(batch_mask[i])
+                
                 all_logits = torch.cat(logits_list, dim=0)
                 all_targets = torch.cat(targets_list, dim=0)
+                all_mask = torch.cat(mask_list, dim=0)
+                
                 loss = cls_loss_fn(all_logits, all_targets)
+                node_mask = (all_mask.sum(dim=1, keepdim=True) > 0).float()
+                loss = (loss * node_mask).sum() / (node_mask.sum() + 1e-6)
+                
                 loss.backward()
             
             optimizer.step()
@@ -509,7 +457,7 @@ def train_stage1_with_dp(
         
         # Validation
         model.eval()
-        val_probs, val_targets = [], []
+        val_probs, val_targets, val_masks_list = [], [], []
         with torch.no_grad():
             for i in range(len(val_x)):
                 data = Data(
@@ -522,14 +470,22 @@ def train_stage1_with_dp(
                 # REMOVED AGGREGATION
                 val_probs.append(torch.sigmoid(node_logits).cpu())
                 val_targets.append(val_y_cls[i].cpu())
+                val_masks_list.append(val_mask[i].cpu())
         
-        val_probs_np = torch.cat(val_probs).numpy()
-        val_targets_np = torch.cat(val_targets).numpy()
-        # Per-channel (arrival/departure) metrics + macro averages
-        val_metrics = classification_metrics_per_channel(
-            val_probs_np,
-            val_targets_np,
-            channel_names=("arrival", "departure"),
+        val_probs_t = torch.cat(val_probs)
+        val_targets_t = torch.cat(val_targets)
+        val_masks_t = torch.cat(val_masks_list)
+        
+        # Filter valid nodes
+        node_mask = (val_masks_t.sum(dim=1, keepdim=True) > 0)
+        val_probs_filtered = val_probs_t[node_mask]
+        val_targets_filtered = val_targets_t[node_mask]
+        
+        val_probs_np = val_probs_filtered.numpy()
+        val_targets_np = val_targets_filtered.numpy()
+        val_metrics = classification_metrics(
+            val_probs_np.reshape(-1, 1),
+            val_targets_np.reshape(-1, 1),
         )
         
         epoch_time = time.time() - epoch_start_time
@@ -556,9 +512,7 @@ def train_stage1_with_dp(
         eps_str = f"ε: {current_epsilon:.3f}/{dp_config.target_epsilon}" if dp_config.enabled else "No DP"
         print(
             f"Epoch {epoch}/{epochs} | Loss: {history[-1]['train_loss']:.4f} | "
-            f"Val F1 (macro): {val_metrics['f1']:.4f} "
-            f"[arr {val_metrics['f1_arrival']:.4f}, dep {val_metrics['f1_departure']:.4f}] | "
-            f"{eps_str} | Time: {epoch_time:.2f}s"
+            f"Val F1: {val_metrics['f1']:.4f} | {eps_str} | Time: {epoch_time:.2f}s"
         )
         
         if val_metrics['f1'] > best_f1:
@@ -598,9 +552,11 @@ def train_stage2_with_dp(
     train_x: torch.Tensor,
     train_y_reg: torch.Tensor,
     train_y_cls: torch.Tensor,
+    train_mask: torch.Tensor,
     val_x: torch.Tensor,
     val_y_reg: torch.Tensor,
     val_y_cls: torch.Tensor,
+    val_mask: torch.Tensor,
     edge_indices: Tuple,
     device: torch.device,
     epochs: int,
@@ -625,7 +581,7 @@ def train_stage2_with_dp(
         param.requires_grad = False
     
     optimizer = torch.optim.Adam(model.regressor.parameters(), lr=lr, weight_decay=1e-4)
-    reg_loss_fn = nn.MSELoss(reduction='mean')
+    reg_loss_fn = nn.MSELoss(reduction='none')
     
     accountant = RDPAccountant(
         noise_multiplier=dp_config.noise_multiplier,
@@ -668,12 +624,13 @@ def train_stage2_with_dp(
             batch_x = train_x[batch_indices].to(device)
             batch_y_reg = train_y_reg[batch_indices].to(device)
             batch_y_cls = train_y_cls[batch_indices].to(device)
+            batch_mask = train_mask[batch_indices].to(device)
             
             optimizer.zero_grad(set_to_none=True)
             
             if dp_config.enabled:
                 per_sample_grads = clipper.compute_per_sample_gradients(
-                    batch_x, batch_y_reg, edge_indices, reg_loss_fn, is_classification=False
+                    batch_x, batch_y_reg, batch_mask, edge_indices, reg_loss_fn, is_classification=False
                 )
                 noisy_grads = clipper.add_noise_to_gradients(
                     per_sample_grads,
@@ -687,6 +644,7 @@ def train_stage2_with_dp(
                 with torch.no_grad():
                     reg_preds = []
                     reg_targets = []
+                    nan_mask_list = []
                     for i in range(len(batch_x)):
                         data = Data(
                             x=batch_x[i],
@@ -698,8 +656,10 @@ def train_stage2_with_dp(
                         # REMOVED AGGREGATION
                         reg_preds.append(node_reg)
                         reg_targets.append(batch_y_reg[i])
+                        nan_mask_list.append(batch_mask[i])
                     reg_preds = torch.cat(reg_preds, dim=0)
                     reg_targets = torch.cat(reg_targets, dim=0)
+                    nan_mask = torch.cat(nan_mask_list, dim=0)
                     
                     cls_mask = []
                     for i in range(len(batch_y_cls)):
@@ -710,16 +670,16 @@ def train_stage2_with_dp(
                     if mask.dim() == 1:
                         mask = mask.unsqueeze(-1)
                     
-                    # Per-channel masked MSE then macro-average across channels
-                    se = (reg_preds - reg_targets) ** 2
-                    num = (se * mask).sum(dim=0)
-                    den = mask.sum(dim=0).clamp_min(1.0)
-                    loss = (num / den).mean()
+                    mask = mask * nan_mask
+                    loss = reg_loss_fn(reg_preds, reg_targets)
+                    loss = loss * mask
+                    loss = loss.sum() / (mask.sum() + 1e-6)
                 
                 accountant.step()
             else:
                 reg_preds = []
                 reg_targets = []
+                nan_mask_list = []
                 for i in range(len(batch_x)):
                     data = Data(
                         x=batch_x[i],
@@ -731,8 +691,10 @@ def train_stage2_with_dp(
                     # REMOVED AGGREGATION
                     reg_preds.append(node_reg)
                     reg_targets.append(batch_y_reg[i])
+                    nan_mask_list.append(batch_mask[i])
                 reg_preds = torch.cat(reg_preds, dim=0)
                 reg_targets = torch.cat(reg_targets, dim=0)
+                nan_mask = torch.cat(nan_mask_list, dim=0)
                 
                 cls_mask = []
                 for i in range(len(batch_y_cls)):
@@ -743,11 +705,10 @@ def train_stage2_with_dp(
                 if mask.dim() == 1:
                     mask = mask.unsqueeze(-1)
                 
-                # Per-channel masked MSE then macro-average across channels
-                se = (reg_preds - reg_targets) ** 2
-                num = (se * mask).sum(dim=0)
-                den = mask.sum(dim=0).clamp_min(1.0)
-                loss = (num / den).mean()
+                mask = mask * nan_mask
+                loss = reg_loss_fn(reg_preds, reg_targets)
+                loss = loss * mask
+                loss = loss.sum() / (mask.sum() + 1e-6)
                 loss.backward()
             
             optimizer.step()
@@ -771,11 +732,13 @@ def train_stage2_with_dp(
                 if mask.dim() == 1:
                     mask = mask.unsqueeze(-1)
                 
-                # Per-channel masked MSE then macro-average across channels
-                se = (node_reg.cpu() - val_y_reg[i]) ** 2
-                num = (se * mask).sum(dim=0)
-                den = mask.sum(dim=0).clamp_min(1.0)
-                loss = (num / den).mean()
+                # Apply NaN mask
+                nan_mask = val_mask[i].cpu()
+                mask = mask * nan_mask
+                
+                loss = reg_loss_fn(node_reg.cpu(), val_y_reg[i])
+                loss = loss * mask
+                loss = loss.sum() / (mask.sum() + 1e-6)
                 val_losses.append(loss.item())
         
         val_loss = np.mean(val_losses)
@@ -836,9 +799,11 @@ def train_stage3_with_dp(
     train_x: torch.Tensor,
     train_y_reg: torch.Tensor,
     train_y_cls: torch.Tensor,
+    train_mask: torch.Tensor,
     val_x: torch.Tensor,
     val_y_reg: torch.Tensor,
     val_y_cls: torch.Tensor,
+    val_mask: torch.Tensor,
     edge_indices: Tuple,
     device: torch.device,
     epochs: int,
@@ -949,12 +914,14 @@ def train_stage3_with_dp(
             batch_x = train_x[batch_indices].to(device)
             batch_y_reg = train_y_reg[batch_indices].to(device)
             batch_y_cls = train_y_cls[batch_indices].to(device)
+            batch_mask = train_mask[batch_indices].to(device)
 
             optimizer.zero_grad(set_to_none=True)
 
             # Forward pass: collect node-level predictions/targets for batch
             reg_preds: List[torch.Tensor] = []
             reg_targets: List[torch.Tensor] = []
+            nan_mask_list: List[torch.Tensor] = []
             for i in range(len(batch_x)):
                 data = Data(
                     x=batch_x[i],
@@ -966,9 +933,11 @@ def train_stage3_with_dp(
                 # REMOVED AGGREGATION
                 reg_preds.append(node_reg)
                 reg_targets.append(batch_y_reg[i])
+                nan_mask_list.append(batch_mask[i])
 
             reg_preds_t = torch.cat(reg_preds, dim=0)  # [B * N, out_channels]
             reg_targets_t = torch.cat(reg_targets, dim=0)
+            nan_mask_t = torch.cat(nan_mask_list, dim=0)
 
             # Denormalize targets (detached) ONLY for mask creation
             if scaler is not None:
@@ -981,18 +950,17 @@ def train_stage3_with_dp(
 
             # Create element-wise mask for non-delayed values in denormalized space
             element_mask = (targets_denorm.abs() < delay_threshold).float()
-            num_nondelayed_per_ch = element_mask.sum(dim=0)
-            num_nondelayed = num_nondelayed_per_ch.sum()
+            element_mask = element_mask * nan_mask_t
+            num_nondelayed = element_mask.sum()
 
             if num_nondelayed > 0:
                 # Huber loss in NORMALIZED space (keeps gradient graph), masked by denorm threshold
                 loss_per_element = reg_loss_fn(reg_preds_t, reg_targets_t) * element_mask
-                # Per-channel average loss, then macro-average
-                loss_nondelayed_ch = loss_per_element.sum(dim=0) / num_nondelayed_per_ch.clamp_min(1.0)
-                loss_nondelayed = loss_nondelayed_ch.mean()
+                loss_nondelayed = loss_per_element.sum() / num_nondelayed
 
                 # Auxiliary loss on delayed elements after encoder is unfrozen
                 delayed_mask = (targets_denorm.abs() >= delay_threshold).float()
+                delayed_mask = delayed_mask * nan_mask_t
                 num_delayed = delayed_mask.sum()
 
                 if num_delayed > 0 and epoch >= unfreeze_epoch:
@@ -1042,13 +1010,16 @@ def train_stage3_with_dp(
                     pred_denorm = node_reg
 
                 element_mask = (target_denorm.abs() < delay_threshold).float()
-                num_nondelayed_per_ch = element_mask.sum(dim=0)
-                num_nondelayed = num_nondelayed_per_ch.sum()
+                
+                # Apply NaN mask
+                nan_mask = val_mask[i].to(device)
+                element_mask = element_mask * nan_mask
+                
+                num_nondelayed = element_mask.sum()
 
                 if num_nondelayed > 0:
                     se = ((pred_denorm - target_denorm) ** 2) * element_mask
-                    loss_val_ch = se.sum(dim=0) / num_nondelayed_per_ch.clamp_min(1.0)
-                    loss_val = loss_val_ch.mean()
+                    loss_val = se.sum() / num_nondelayed
                     val_losses.append(loss_val.item())
                     val_nondelayed += num_nondelayed.item()
                     val_total += float(element_mask.numel())
@@ -1139,6 +1110,7 @@ def final_evaluation(
     test_x: torch.Tensor,
     test_y_reg: torch.Tensor,
     test_y_cls: torch.Tensor,
+    test_mask: torch.Tensor,
     class_threshold: float,
     delay_threshold: float,
     model_path: str,
@@ -1181,6 +1153,7 @@ def final_evaluation(
     
     logits_list, reg_list = [], []
     targets_cls_list, targets_reg_list = [], []
+    mask_list = []
     
     USE_FAST_EVAL = False
     
@@ -1201,6 +1174,7 @@ def final_evaluation(
             reg_list.append(node_reg.cpu().numpy())
             targets_cls_list.append(test_y_cls[i].cpu().numpy())
             targets_reg_list.append(test_y_reg[i].cpu().numpy())
+            mask_list.append(test_mask[i].cpu().numpy())
             
             if (i + 1) % 1000 == 0 or (i + 1) == len(test_x):
                 print(f"  Processed {i+1}/{len(test_x)} samples...")
@@ -1209,17 +1183,27 @@ def final_evaluation(
     test_reg_preds = np.concatenate(reg_list, axis=0)
     test_cls_targets = np.concatenate(targets_cls_list, axis=0)
     test_reg_targets = np.concatenate(targets_reg_list, axis=0)
+    test_masks = np.concatenate(mask_list, axis=0)
     
-    # Classification metrics (arrival/departure separately + macro)
-    test_cls_metrics = classification_metrics_per_channel(
-        test_probs,
-        test_cls_targets,
-        channel_names=("arrival", "departure"),
+    # Filter valid nodes for classification
+    node_mask = (test_masks.sum(axis=1) > 0)
+    test_probs = test_probs[node_mask]
+    test_cls_targets = test_cls_targets[node_mask]
+    
+    # Filter regression arrays by node_mask first
+    test_reg_preds = test_reg_preds[node_mask]
+    test_reg_targets = test_reg_targets[node_mask]
+    test_masks = test_masks[node_mask]
+    
+    # Classification metrics
+    test_cls_metrics = classification_metrics(
+        test_probs.reshape(-1, 1),
+        test_cls_targets.reshape(-1, 1),
     )
     
-    # Apply classifier gating
-    test_mask = (test_probs >= class_threshold)
-    gated_preds = test_reg_preds * test_mask
+    # Apply classifier gating without shadowing NaN mask
+    cls_gate = (test_probs >= class_threshold)
+    gated_preds = test_reg_preds * cls_gate
     
     if scaler is not None:
         preds_denorm = scaler.inverse_transform(gated_preds)
@@ -1229,6 +1213,14 @@ def final_evaluation(
         targets_denorm = test_reg_targets
     
     # Treat negative values as on time (0 min)
+    # Apply element-wise mask to denormalized arrays
+    preds_denorm = preds_denorm.flatten()
+    targets_denorm = targets_denorm.flatten()
+    flat_mask = test_masks.flatten()
+    
+    preds_denorm = preds_denorm[flat_mask > 0]
+    targets_denorm = targets_denorm[flat_mask > 0]
+    
     preds_denorm = np.maximum(0, preds_denorm)
     targets_denorm = np.maximum(0, targets_denorm)
     
@@ -1256,20 +1248,9 @@ def final_evaluation(
     mae_overall = np.mean(np.abs(preds_denorm - targets_denorm))
     rmse_overall = np.sqrt(np.mean((preds_denorm - targets_denorm) ** 2))
     
-    print("\nCLASSIFICATION (macro over arrival/departure):")
+    print("\nCLASSIFICATION:")
     print(f"  Precision: {test_cls_metrics['precision']:.4f} | Recall: {test_cls_metrics['recall']:.4f}")
     print(f"  F1: {test_cls_metrics['f1']:.4f} | Accuracy: {test_cls_metrics['accuracy']:.4f}")
-    print("  Per-channel:")
-    print(
-        f"    Arrival   - P: {test_cls_metrics['precision_arrival']:.4f} "
-        f"R: {test_cls_metrics['recall_arrival']:.4f} F1: {test_cls_metrics['f1_arrival']:.4f} "
-        f"Acc: {test_cls_metrics['accuracy_arrival']:.4f}"
-    )
-    print(
-        f"    Departure - P: {test_cls_metrics['precision_departure']:.4f} "
-        f"R: {test_cls_metrics['recall_departure']:.4f} F1: {test_cls_metrics['f1_departure']:.4f} "
-        f"Acc: {test_cls_metrics['accuracy_departure']:.4f}"
-    )
     
     print(f"\nREGRESSION (delayed flights >= {delay_threshold} min):")
     print(f"  MAE: {mae_delayed:.4f} min | RMSE: {rmse_delayed:.4f} min")
@@ -1477,6 +1458,62 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def build_sequences_with_mask(
+    input_data: np.ndarray,
+    target_scaled: np.ndarray,
+    raw: np.ndarray,
+    seq_len: int,
+    horizon: int,
+    delay_threshold: float,
+    target_horizons: Optional[List[int]] = None,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Build sequences with mask for NaN values."""
+    num_nodes = input_data.shape[0]
+    max_idx = input_data.shape[1] - seq_len - horizon
+    x_list, y_reg_list, y_cls_list, mask_list = [], [], [], []
+
+    if target_horizons:
+        horizon_ids = [min(h, horizon) - 1 for h in sorted({h for h in target_horizons if h > 0})]
+    else:
+        horizon_ids = list(range(horizon))
+    if not horizon_ids:
+        raise ValueError("At least one future horizon is required to build sequences.")
+
+    for t in range(max_idx):
+        x_seq = input_data[:, t:t + seq_len, :].reshape(num_nodes, -1)
+        future_scaled = target_scaled[:, t + seq_len:t + seq_len + horizon, :]
+        future_scaled = future_scaled[:, horizon_ids, :]
+        y_seq = future_scaled.reshape(num_nodes, -1)
+
+        raw_target = raw[:, t + seq_len:t + seq_len + horizon, :]
+        raw_target_slice = raw_target[:, horizon_ids, :]
+        
+        # Create mask: 1 if valid, 0 if NaN
+        mask_seq = (~np.isnan(raw_target_slice)).astype(np.float32)
+        mask_seq = mask_seq.reshape(num_nodes, -1)
+        
+        # Fill NaNs with 0 for the actual targets (so they don't cause errors)
+        raw_target_filled = np.nan_to_num(raw_target_slice)
+        
+        # Node-level classification
+        node_delays = np.max(raw_target_filled, axis=(1, 2))  # [num_nodes]
+        cls_flag = (node_delays >= delay_threshold).astype(np.float32)
+        cls_flag = cls_flag.reshape(num_nodes, 1)
+
+        x_list.append(x_seq)
+        y_reg_list.append(y_seq)
+        y_cls_list.append(cls_flag)
+        mask_list.append(mask_seq)
+
+    tensors = (
+        torch.tensor(np.stack(x_list), dtype=torch.float32),
+        torch.tensor(np.stack(y_reg_list), dtype=torch.float32),
+        torch.tensor(np.stack(y_cls_list), dtype=torch.float32),
+        torch.tensor(np.stack(mask_list), dtype=torch.float32),
+    )
+    return tensors
+
+
 def main() -> None:
     global CHECKPOINT_DIR
     args = parse_args()
@@ -1520,20 +1557,17 @@ def main() -> None:
     
     build_fn = build_sequences_node_level if args.use_node_level else build_sequences
     
-    if args.use_node_level:
-        print("[INFO] Using NODE-LEVEL labels")
-    else:
-        print("[INFO] Using GRAPH-LEVEL labels")
-    
-    train_x, train_y_reg, train_y_cls = build_fn(
+    # Always build with NaN mask to avoid training on imputed zeros
+    print("[INFO] Using NODE-LEVEL labels with NaN masking")
+    train_x, train_y_reg, train_y_cls, train_mask = build_sequences_with_mask(
         train_inputs, train_delay_scaled, train_raw,
         args.seq_len, max_horizon, args.delay_threshold, horizons
     )
-    val_x, val_y_reg, val_y_cls = build_fn(
+    val_x, val_y_reg, val_y_cls, val_mask = build_sequences_with_mask(
         val_inputs, val_delay_scaled, val_raw,
         args.seq_len, max_horizon, args.delay_threshold, horizons
     )
-    test_x, test_y_reg, test_y_cls = build_fn(
+    test_x, test_y_reg, test_y_cls, test_mask = build_sequences_with_mask(
         test_inputs, test_delay_scaled, test_raw,
         args.seq_len, max_horizon, args.delay_threshold, horizons
     )
@@ -1581,7 +1615,39 @@ def main() -> None:
     print(f"  Val: {val_y_cls.mean().item():.2%} delayed")
     print(f"  Test: {test_y_cls.mean().item():.2%} delayed")
     
-   
+    # Visualize training data distribution
+    if VISUALIZATION_AVAILABLE:
+        print("\n[VISUALIZATION] Generating training data distribution plots...")
+        try:
+            # Prepare data for visualization (convert to numpy)
+            train_x_viz = train_x.cpu().numpy() if isinstance(train_x, torch.Tensor) else train_x
+            train_y_cls_viz = train_y_cls.cpu().numpy() if isinstance(train_y_cls, torch.Tensor) else train_y_cls
+            train_y_reg_viz = train_y_reg.cpu().numpy() if isinstance(train_y_reg, torch.Tensor) else train_y_reg
+            
+            # If data is in normalized form, denormalize regression targets for visualization
+            if scaler is not None:
+                train_y_reg_denorm = scaler.inverse_transform(
+                    train_y_reg_viz.reshape(-1, train_y_reg_viz.shape[-1])
+                ).reshape(train_y_reg_viz.shape)
+            else:
+                train_y_reg_denorm = train_y_reg_viz
+            
+            # Flatten classification labels for visualization
+            train_y_cls_flat = train_y_cls_viz.mean(axis=(1, 2)) if train_y_cls_viz.ndim > 1 else train_y_cls_viz
+            train_y_reg_flat = train_y_reg_denorm.mean(axis=(1, 2)) if train_y_reg_denorm.ndim > 1 else train_y_reg_denorm
+            
+            visualize_training_data(
+                train_x_viz,
+                train_y_cls_flat,
+                train_y_reg_flat,
+                threshold=args.delay_threshold,
+                sample_size=min(2000, len(train_x_viz)),
+                save_path=f"training_data_visualization_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            )
+            print("  ✓ Training data visualization saved")
+        except Exception as e:
+            print(f"  ✗ Error generating training data visualization: {e}")
+    
     edge_indices = (
         edge_index_adj.to(device),
         edge_index_od.to(device),
@@ -1591,7 +1657,7 @@ def main() -> None:
     model = SequentialTwoStagePredictor(
         in_channels=in_channels,
         out_channels=out_channels,
-        hidden_channels=16,
+        hidden_channels=32,
     ).to(device)
     
     total_samples = len(train_x)
@@ -1616,10 +1682,8 @@ def main() -> None:
         epsilon_tolerance=args.epsilon_tolerance,
     )
     
-    # Per-channel (arrival, departure) positive rate aggregated across all samples and airports
-    cls_pos_rate = train_y_cls.float().mean(dim=(0, 1))  # shape: [2]
-    # pos_weight = negatives / positives, broadcast over the two channels
-    pos_weight = (1.0 - cls_pos_rate + 1e-6) / (cls_pos_rate + 1e-6)
+    cls_pos_rate = train_y_cls.mean().item()
+    pos_weight = (1 - cls_pos_rate + 1e-6) / (cls_pos_rate + 1e-6)
     
     print("\n" + "="*80)
     print("DATASET INFORMATION")
@@ -1627,24 +1691,24 @@ def main() -> None:
     print(f"Train samples: {len(train_x)}")
     print(f"Val samples: {len(val_x)}")
     print(f"Test samples: {len(test_x)}")
-    print(f"Class balance (delayed): {cls_pos_rate.mean().item():.2%}")
+    print(f"Class balance (delayed): {cls_pos_rate:.2%}")
     
     history_s1, accountant_s1, stage1_time = train_stage1_with_dp(
-        model, train_x, train_y_cls, val_x, val_y_cls,
+        model, train_x, train_y_cls, train_mask, val_x, val_y_cls, val_mask,
         edge_indices, device, args.stage1_epochs, args.lr,
         pos_weight, args.patience, dp_config, args.batch_size,
     )
     
     history_s2, accountant_s2, stage2_time = train_stage2_with_dp(
-        model, train_x, train_y_reg, train_y_cls,
-        val_x, val_y_reg, val_y_cls, edge_indices, device,
+        model, train_x, train_y_reg, train_y_cls, train_mask,
+        val_x, val_y_reg, val_y_cls, val_mask, edge_indices, device,
         args.stage2_epochs, args.lr, scaler, args.class_threshold,
         args.patience, dp_config, args.batch_size, accountant_s1,
     )
     
     history_s3, accountant_s3, stage3_time = train_stage3_with_dp(
-        model, train_x, train_y_reg, train_y_cls,
-        val_x, val_y_reg, val_y_cls, edge_indices, device,
+        model, train_x, train_y_reg, train_y_cls, train_mask,
+        val_x, val_y_reg, val_y_cls, val_mask, edge_indices, device,
         args.stage3_epochs, args.lr, scaler, args.class_threshold,
         args.delay_threshold,  # FIXED: Pass actual delay threshold
         args.patience, dp_config, args.batch_size, accountant_s2,
@@ -1671,7 +1735,7 @@ def main() -> None:
     
     final_evaluation(
         model, edge_indices, device, scaler, horizons,
-        delay_dim, num_nodes, test_x, test_y_reg, test_y_cls,
+        delay_dim, num_nodes, test_x, test_y_reg, test_y_cls, test_mask,
         args.class_threshold, args.delay_threshold, args.model_path, combined_history,
         final_epsilon, final_delta, stage1_time, stage2_time, stage3_time,
         len(train_x), len(val_x), dp_config,

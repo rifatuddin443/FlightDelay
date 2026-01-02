@@ -202,7 +202,7 @@ class SequentialTwoStagePredictor(nn.Module):
         embed_dim = hidden_channels
 
         self.classifier = KAN(
-            layers_hidden=[embed_dim, embed_dim // 2, 1],
+            layers_hidden=[embed_dim, embed_dim // 2, out_channels],
             grid_size=3,
             spline_order=2,
         )
@@ -291,9 +291,13 @@ def load_flight_data(
     weather_train = weather_data[:, :train_end, :]
     weather_mean = np.nanmean(weather_train, axis=(0, 1))
     weather_std = np.nanstd(weather_train, axis=(0, 1))
+    # Prevent division by near-zero std (add epsilon for numerical stability)
+    weather_std = np.maximum(weather_std, 1e-6)
     weather_scaler = StandardScaler(weather_mean, weather_std)
     weather_scaled = weather_scaler.transform(weather_data)
     weather_scaled = np.nan_to_num(weather_scaled)
+    # Clip to prevent extreme outliers from dominating the model
+    weather_scaled = np.clip(weather_scaled, -1.5, 1.5)
 
     # Temporal embeddings (sin/cos encoding of 24h cycle)
     time_indices = np.arange(total_steps)

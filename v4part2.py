@@ -1,3 +1,4 @@
+
 """Properly implemented differentially private sequential KAN-GAT pipeline with epsilon budget control.
 
 FIXED:
@@ -61,6 +62,172 @@ try:
 except ImportError:
     print("Warning: visualize_training_classification not found. Visualizations will be skipped.")
     VISUALIZATION_AVAILABLE = False
+
+
+# Override build_sequences to keep 3D temporal structure
+def build_sequences_temporal(
+    input_data: np.ndarray,
+    target_scaled: np.ndarray,
+    raw: np.ndarray,
+    seq_len: int,
+    horizon: int,
+    delay_threshold: float,
+    target_horizons: Optional[List[int]] = None,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Build sequences keeping temporal structure [num_nodes, seq_len, features]."""
+    num_nodes = input_data.shape[0]
+    max_idx = input_data.shape[1] - seq_len - horizon
+    x_list, y_reg_list, y_cls_list = [], [], []
+
+    if target_horizons:
+        horizon_ids = [min(h, horizon) - 1 for h in sorted({h for h in target_horizons if h > 0})]
+    else:
+        horizon_ids = list(range(horizon))
+    if not horizon_ids:
+        raise ValueError("At least one future horizon is required to build sequences.")
+
+    for t in range(max_idx):
+        # Keep 3D: [num_nodes, seq_len, features]
+        x_seq = input_data[:, t:t + seq_len, :]
+        
+        future_scaled = target_scaled[:, t + seq_len:t + seq_len + horizon, :]
+        future_scaled = future_scaled[:, horizon_ids, :]
+        y_seq = future_scaled.reshape(num_nodes, -1)
+        
+        raw_target = raw[:, t + seq_len:t + seq_len + horizon, :]
+        raw_target = np.nan_to_num(raw_target[:, horizon_ids, :])
+        
+        # Per-node, per-feature classification
+        node_delays = np.max(raw_target, axis=1)  # [num_nodes, num_features]
+        cls_flag = (node_delays >= delay_threshold).astype(np.float32)
+
+        x_list.append(x_seq)
+        y_reg_list.append(y_seq)
+        y_cls_list.append(cls_flag)
+
+    tensors = (
+        torch.tensor(np.stack(x_list), dtype=torch.float32),
+        torch.tensor(np.stack(y_reg_list), dtype=torch.float32),
+        torch.tensor(np.stack(y_cls_list), dtype=torch.float32),
+    )
+    
+    # Print balance
+    cls_tensor = tensors[2]
+    delayed_rate = cls_tensor.mean().item()
+    print(f"\nNode-level balance (temporal): {delayed_rate:.2%} delayed")
+    
+    return tensors
+
+
+# Import GAT components we need
+from torch_geometric.nn import GATConv  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'efficient-kan', 'src'))
+from kan import KAN  # noqa: E402
+
+
+class TemporalGATEncoder(nn.Module):
+    """GAT encoder with temporal encoding via LSTM before spatial aggregation."""
+    
+    def __init__(self, feature_dim: int, seq_len: int, hidden_channels: int = 32, heads: int = 2):
+        super().__init__()
+        self.feature_dim = feature_dim
+        self.seq_len = seq_len
+        
+        # Temporal encoding: LSTM processes [seq_len, features] per node
+        self.temporal_lstm = nn.LSTM(
+            input_size=feature_dim,
+            hidden_size=hidden_channels,
+            num_layers=1,
+            batch_first=True,
+            dropout=0.0,
+        )
+        
+        # Spatial encoding: GAT on temporally-encoded nodes
+        self.alpha_adj = nn.Parameter(torch.tensor(1.0))
+        self.alpha_od = nn.Parameter(torch.tensor(1.0))
+        self.alpha_od_t = nn.Parameter(torch.tensor(1.0))
+        
+        self.gat_adj = GATConv(hidden_channels, hidden_channels, heads=heads, concat=False, dropout=0.1)
+        self.gat_od = GATConv(hidden_channels, hidden_channels, heads=heads, concat=False, dropout=0.1)
+        self.gat_od_t = GATConv(hidden_channels, hidden_channels, heads=heads, concat=False, dropout=0.1)
+        
+        fusion_input_dim = hidden_channels * 3 + 3
+        self.fusion_kan = KAN(
+            layers_hidden=[fusion_input_dim, hidden_channels, hidden_channels],
+            grid_size=3,
+            spline_order=2,
+        )
+        self.dropout = nn.Dropout(0.3)
+    
+    def forward(self, data: Data) -> torch.Tensor:
+        # data.x: [num_nodes, seq_len, feature_dim]
+        x = data.x
+        num_nodes = x.size(0)
+        
+        # Temporal encoding per node: [num_nodes, seq_len, feature_dim] -> [num_nodes, hidden]
+        _, (h_n, _) = self.temporal_lstm(x)  # h_n: [1, num_nodes, hidden]
+        x_temporal = h_n.squeeze(0)  # [num_nodes, hidden]
+        
+        # Spatial aggregation via GAT
+        weights = F.softmax(torch.stack([self.alpha_adj, self.alpha_od, self.alpha_od_t]), dim=0)
+        w_adj, w_od, w_od_t = weights
+        
+        x_adj = self.gat_adj(x_temporal, data.edge_index_adj)
+        x_od = self.gat_od(x_temporal, data.edge_index_od)
+        x_od_t = self.gat_od_t(x_temporal, data.edge_index_od_t)
+        
+        scalars = torch.cat([
+            w_adj.expand(num_nodes, 1),
+            w_od.expand(num_nodes, 1),
+            w_od_t.expand(num_nodes, 1),
+        ], dim=1)
+        
+        x_concat = torch.cat([x_adj, x_od, x_od_t, scalars], dim=1)
+        fused = F.relu(self.fusion_kan(x_concat))
+        fused = self.dropout(fused)
+        return fused
+
+
+class SequentialTwoStagePredictor(nn.Module):
+    """Classifier and regressor with temporal-aware encoding."""
+
+    def __init__(self, in_channels: int, out_channels: int, hidden_channels: int = 32, seq_len: int = 8):
+        super().__init__()
+        # in_channels is now feature_dim, not flattened
+        self.encoder = TemporalGATEncoder(in_channels, seq_len, hidden_channels=hidden_channels)
+        embed_dim = hidden_channels
+
+        self.classifier = KAN(
+            layers_hidden=[embed_dim, embed_dim // 2, out_channels],
+            grid_size=3,
+            spline_order=2,
+        )
+        self.regressor = KAN(
+            layers_hidden=[embed_dim, embed_dim // 2, out_channels],
+            grid_size=3,
+            spline_order=2,
+        )
+        self.dropout_cls = nn.Dropout(0.2)
+        self.dropout_reg = nn.Dropout(0.2)
+
+    def forward_classifier(self, data: Data) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Stage 1: Return embeddings and classification logits."""
+        hidden = self.encoder(data)
+        hidden_dropped = self.dropout_cls(hidden)
+        logits = self.classifier(hidden_dropped)
+        return hidden, logits
+
+    def forward_regressor(self, hidden: torch.Tensor) -> torch.Tensor:
+        """Stage 2: Regress on precomputed embeddings."""
+        hidden_dropped = self.dropout_reg(hidden)
+        return self.regressor(hidden_dropped)
+
+    def forward(self, data: Data) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Full forward pass for inference."""
+        hidden = self.encoder(data)
+        logits = self.classifier(self.dropout_cls(hidden))
+        reg_out = self.regressor(self.dropout_reg(hidden))
+        return logits, reg_out
 
 
 class GraphSequenceData(Data):
@@ -1515,10 +1682,13 @@ def main() -> None:
     max_horizon = horizons[0]
     feature_dim = train_inputs.shape[2]
     delay_dim = train_delay_scaled.shape[2]
-    in_channels = args.seq_len * feature_dim
+    # Keep temporal structure: use feature_dim directly, not flattened
+    in_channels = feature_dim
+    seq_len = args.seq_len
     out_channels = delay_dim
     
-    build_fn = build_sequences_node_level if args.use_node_level else build_sequences
+    # Use temporal-aware build function
+    build_fn = build_sequences_temporal
     
     if args.use_node_level:
         print("[INFO] Using NODE-LEVEL labels")
@@ -1592,6 +1762,7 @@ def main() -> None:
         in_channels=in_channels,
         out_channels=out_channels,
         hidden_channels=16,
+        seq_len=seq_len,
     ).to(device)
     
     total_samples = len(train_x)

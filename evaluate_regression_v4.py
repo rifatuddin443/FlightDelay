@@ -1,8 +1,8 @@
 """Test script for threestagev4noise.py models (single-horizon, DP, three-stage).
 
-Designed to evaluate checkpoints produced by threestagev4noise.py, which trains
-with a single forecast horizon, fixed Gaussian noise multiplier, and a Stage 3
-fine-tune on flights under the delay threshold.
+    Designed to evaluate checkpoints produced by threestagev4noise.py, which trains
+    with a single forecast horizon, fixed Gaussian noise multiplier, and a Stage 3
+    fine-tune on flights under the delay threshold.
 """
 
 from __future__ import annotations
@@ -155,8 +155,8 @@ def _evaluate_three_stage_per_horizon(
 ]:
     """Evaluate three-stage model with separate metrics per horizon for delayed/non-delayed.
     
-    Since the model uses classifier gating, predictions for delayed flights come through
-    the classifier gate, while non-delayed flights get zero predictions.
+    For newer dual-regressor checkpoints, predictions are formed by gating/mixing:
+    delayed regressor vs non-delayed regressor.
     
     Returns:
         - Classification metrics
@@ -195,8 +195,10 @@ def _evaluate_three_stage_per_horizon(
                 hidden_dropped = model.dropout_reg(hidden)
                 reg_delayed = model.regressor_delayed(hidden_dropped)
                 reg_nondelayed = model.regressor_nondelayed(hidden_dropped)
-                mask = (probs >= class_threshold).float()
-                node_reg = reg_delayed * mask + reg_nondelayed * (1.0 - mask)
+                # Soft gating: smoothly mix regressors based on delayed probability.
+                # class_threshold is treated as the midpoint (gate=0.5 when prob==threshold).
+                gate = torch.sigmoid((probs - class_threshold) * 10.0)
+                node_reg = reg_delayed * gate + reg_nondelayed * (1.0 - gate)
             else:
                 node_reg = model.forward_regressor(hidden)
             
@@ -648,7 +650,7 @@ def parse_args() -> argparse.Namespace:
         help="Single forecast horizon (must match threestagev4noise training run).",
     )
     parser.add_argument("--delay_threshold", type=float, default=5.0)
-    parser.add_argument("--class_threshold", type=float, default=0.5)
+    parser.add_argument("--class_threshold", type=float, default=0.6)
     parser.add_argument("--use_node_level", action="store_true", default=True, help="Use node-level labels")
     parser.add_argument("--weather_file", type=str, default="weather_cn.npy")
     parser.add_argument("--period_hours", type=int, default=24)

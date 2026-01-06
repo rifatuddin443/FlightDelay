@@ -1294,8 +1294,10 @@ def final_evaluation(
                 hidden_dropped = model.dropout_reg(hidden)
                 reg_delayed = model.regressor_delayed(hidden_dropped)
                 reg_nondelayed = model.regressor_nondelayed(hidden_dropped)
-                mask = (probs >= class_threshold).float()
-                node_reg = reg_delayed * mask + reg_nondelayed * (1.0 - mask)
+                # Soft gating: smoothly mix regressors based on delayed probability.
+                # class_threshold is treated as the midpoint (gate=0.5 when prob==threshold).
+                gate = torch.sigmoid((probs - class_threshold) * 10.0)
+                node_reg = reg_delayed * gate + reg_nondelayed * (1.0 - gate)
             else:
                 node_reg = model.forward_regressor(hidden)
 
@@ -1580,7 +1582,7 @@ def parse_args() -> argparse.Namespace:
         help='Train/test ONLY this horizon (choose one of 3, 6, 12, 24). Example: --horizons 24',
     )
     parser.add_argument('--delay_threshold', type=float, default=5.0)
-    parser.add_argument('--class_threshold', type=float, default=0.5)
+    parser.add_argument('--class_threshold', type=float, default=0.6)
     parser.add_argument('--use_node_level', action='store_true', default=True, help='Use node-level labels')
     parser.add_argument('--weather_file', type=str, default='weather_cn.npy')
     parser.add_argument('--period_hours', type=int, default=24)

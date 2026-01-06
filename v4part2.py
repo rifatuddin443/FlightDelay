@@ -1399,21 +1399,25 @@ def final_evaluation(
     preds_denorm = np.maximum(0, preds_denorm)
     targets_denorm = np.maximum(0, targets_denorm)
     
+    # Flatten arrays for consistent masking (multi-channel arrays need flattening before masking)
+    preds_flat = preds_denorm.flatten()
+    targets_flat = targets_denorm.flatten()
+    
     # Evaluate on delayed flights (Actual >= Threshold)
-    delayed_mask = targets_denorm.flatten() >= delay_threshold
+    delayed_mask = targets_flat >= delay_threshold
     if delayed_mask.sum() > 0:
-        delayed_preds = preds_denorm[delayed_mask]
-        delayed_targets = targets_denorm[delayed_mask]
+        delayed_preds = preds_flat[delayed_mask]
+        delayed_targets = targets_flat[delayed_mask]
         mae_delayed = np.mean(np.abs(delayed_preds - delayed_targets))
         rmse_delayed = np.sqrt(np.mean((delayed_preds - delayed_targets) ** 2))
     else:
         mae_delayed, rmse_delayed = 0.0, 0.0
     
     # Evaluate on non-delayed flights (1 min <= Actual < Threshold)
-    nondelayed_mask = (targets_denorm.flatten() >= 1.0) & (targets_denorm.flatten() < delay_threshold)
+    nondelayed_mask = (targets_flat >= 1.0) & (targets_flat < delay_threshold)
     if nondelayed_mask.sum() > 0:
-        nondelayed_preds = preds_denorm[nondelayed_mask]
-        nondelayed_targets = targets_denorm[nondelayed_mask]
+        nondelayed_preds = preds_flat[nondelayed_mask]
+        nondelayed_targets = targets_flat[nondelayed_mask]
         mae_nondelayed = np.mean(np.abs(nondelayed_preds - nondelayed_targets))
         rmse_nondelayed = np.sqrt(np.mean((nondelayed_preds - nondelayed_targets) ** 2))
     else:
@@ -1625,11 +1629,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--use_node_level', action='store_true', default=True, help='Use node-level labels')
     parser.add_argument('--weather_file', type=str, default='weather_cn.npy')
     parser.add_argument('--period_hours', type=int, default=24)
-    parser.add_argument('--stage1_epochs', type=int, default=6)
-    parser.add_argument('--stage2_epochs', type=int, default=6)
-    parser.add_argument('--stage3_epochs', type=int, default=6, help='Epochs for non-delayed regressor')
-    parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--lr', type=float, default=0.001)
+    parser.add_argument('--stage1_epochs', type=int, default=8)
+    parser.add_argument('--stage2_epochs', type=int, default=4)
+    parser.add_argument('--stage3_epochs', type=int, default=4, help='Epochs for non-delayed regressor')
+    parser.add_argument('--batch_size', type=int, default=128)
+    parser.add_argument('--lr', type=float, default=0.005)
     parser.add_argument('--patience', type=int, default=5)
     parser.add_argument('--dp', default=True, action='store_true', help='Enable DP-SGD')
     parser.add_argument('--target_epsilon', type=float, default=15.0, help='Target epsilon for tracking (not used for computing noise)')
@@ -1640,7 +1644,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--epsilon_tolerance', type=float, default=0.05)
     parser.add_argument('--model_path', type=str, default='kan_gat_dp_three_stage.pth')
     parser.add_argument('--seed', type=int, default=None, help='Random seed (None for random)')
-    parser.add_argument('--balance_50_50', action='store_true', default=False, help='Apply random undersampling to achieve 50-50 class balance')
+    parser.add_argument('--balance_50_50', action='store_true', default=True, help='Apply random undersampling to achieve 50-50 class balance')
     return parser.parse_args()
 
 

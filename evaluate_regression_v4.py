@@ -1,14 +1,13 @@
 """Test script for threestagev4noise.py models (single-horizon, DP, three-stage).
 
-    Designed to evaluate checkpoints produced by threestagev4noise.py, which trains
-    with a single forecast horizon, fixed Gaussian noise multiplier, and a Stage 3
-    fine-tune on flights under the delay threshold.
+Designed to evaluate checkpoints produced by threestagev4noise.py, which trains
+with a single forecast horizon, fixed Gaussian noise multiplier, and a Stage 3
+fine-tune on flights under the delay threshold.
 """
 
 from __future__ import annotations
 import argparse
 import csv
-import copy
 import glob
 import os
 import sys
@@ -18,6 +17,14 @@ from typing import Dict, List, Tuple, Optional
 import numpy as np
 import torch
 from torch_geometric.data import Data
+
+# Make plotting safe in headless runs (saves PNGs without interactive windows).
+try:
+    import matplotlib
+
+    matplotlib.use("Agg")
+except Exception:
+    pass
 
 # Reuse shared utilities
 sys.path.insert(0, os.path.dirname(__file__))
@@ -30,107 +37,34 @@ from classifykat import (  # noqa: E402
 )
 from classifykat_balanced import build_sequences_node_level  # noqa: E402
 
+# Optional visualization utilities (shared across scripts)
+try:
+    from visualize_training_classification import (  # noqa: E402
+        visualize_classification_results,
+        visualize_regression_after_classification,
+        visualize_regression_timeseries,
+        visualize_three_stage_pipeline,
+    )
 
-class MinMaxScaler:
-    """Min-Max scaler matching v4noisescalefix.py implementation.
-    
-    Scales data to [0, 1] range without mean shifting.
-    Handles NaN values by replacing them with 0 (no delay).
-    """
-    def __init__(self):
-        self.min = None
-        self.max = None
-        self.range = None
-        # For compatibility with existing code
-        self.mean = None
-        self.std = None
-    
-    def fit(self, X):
-        """Compute min and max for scaling."""
-        self.min = np.min(X, axis=0)
-        self.max = np.max(X, axis=0)
-        self.range = self.max - self.min
-        # Prevent division by zero
-        self.range[self.range == 0] = 1.0
-        # For compatibility
-        self.mean = self.min
-        self.std = self.range
-        return self
-    
-    def transform(self, X):
-        """Scale X to [0, 1] range. Replaces NaN values with 0 (no delay)."""
-        if self.min is None or self.max is None:
-            raise ValueError("Scaler not fitted yet. Call fit() first.")
-        # Scale the data
-        scaled = (X - self.min) / self.range
-        # Replace NaN values with 0 (treat missing delays as on-time)
-        scaled = np.nan_to_num(scaled, nan=0.0)
-        return scaled
-    
-    def fit_transform(self, X):
-        """Fit and transform in one step."""
-        return self.fit(X).transform(X)
-    
-    def inverse_transform(self, X_scaled):
-        """Transform scaled data back to original range. Handles NaN by replacing with 0."""
-        if self.min is None or self.max is None:
-            raise ValueError("Scaler not fitted yet. Call fit() first.")
-        # Replace any NaN values in scaled data with 0 before inverse transform
-        X_scaled_clean = np.nan_to_num(X_scaled, nan=0.0)
-        return X_scaled_clean * self.range + self.min
-
+    VISUALIZATION_AVAILABLE = True
+except Exception:
+    VISUALIZATION_AVAILABLE = False
 
 # Import per-channel metrics from threestagev4noise
 try:
     from threestagev4noise import classification_metrics_per_channel
 except ImportError:
-    # Fallback: full implementation matching threestagev4noise.py
-    def classification_metrics_per_channel(
-        preds: np.ndarray,
-        targets: np.ndarray,
-        channel_names: Tuple[str, ...] = ("arrival", "departure"),
-    ) -> Dict[str, float]:
-        """Compute precision/recall/F1/accuracy per output channel.
-        
-        Expects preds/targets shaped [N, C] (or any shape that can be reshaped to [-1, C]).
-        Returns both per-channel metrics and macro-averaged metrics.
-        """
-        preds_2d = preds.reshape(-1, preds.shape[-1])
-        targets_2d = targets.reshape(-1, targets.shape[-1])
-        n_channels = preds_2d.shape[1]
-        
-        metrics: Dict[str, float] = {}
-        precisions, recalls, f1s, accuracies = [], [], [], []
-        for c in range(n_channels):
-            preds_bin = preds_2d[:, c] >= 0.5
-            targets_bin = targets_2d[:, c] >= 0.5
-            
-            tp = np.logical_and(preds_bin, targets_bin).sum()
-            fp = np.logical_and(preds_bin, ~targets_bin).sum()
-            fn = np.logical_and(~preds_bin, targets_bin).sum()
-            tn = np.logical_and(~preds_bin, ~targets_bin).sum()
-            
-            precision = float(tp / (tp + fp + 1e-8))
-            recall = float(tp / (tp + fn + 1e-8))
-            f1 = float(2 * precision * recall / (precision + recall + 1e-8))
-            accuracy = float((tp + tn) / (tp + tn + fp + fn + 1e-8))
-            
-            name = channel_names[c] if c < len(channel_names) else f"ch{c}"
-            metrics[f"precision_{name}"] = precision
-            metrics[f"recall_{name}"] = recall
-            metrics[f"f1_{name}"] = f1
-            metrics[f"accuracy_{name}"] = accuracy
-            
-            precisions.append(precision)
-            recalls.append(recall)
-            f1s.append(f1)
-            accuracies.append(accuracy)
-        
-        metrics["precision"] = float(np.mean(precisions)) if precisions else 0.0
-        metrics["recall"] = float(np.mean(recalls)) if recalls else 0.0
-        metrics["f1"] = float(np.mean(f1s)) if f1s else 0.0
-        metrics["accuracy"] = float(np.mean(accuracies)) if accuracies else 0.0
-        return metrics
+    # Fallback: define a simple wrapper
+    def classification_metrics_per_channel(preds, targets, channel_names=('arrival', 'departure')):
+        """Fallback wrapper for per-channel classification metrics."""
+        basic_metrics = classification_metrics(preds, targets)
+        # Add channel-specific placeholders
+        for name in channel_names:
+            basic_metrics[f'precision_{name}'] = basic_metrics['precision']
+            basic_metrics[f'recall_{name}'] = basic_metrics['recall']
+            basic_metrics[f'f1_{name}'] = basic_metrics['f1']
+            basic_metrics[f'accuracy_{name}'] = basic_metrics['accuracy']
+        return basic_metrics
 
 
 def _evaluate_three_stage_per_horizon(
@@ -152,11 +86,13 @@ def _evaluate_three_stage_per_horizon(
     Dict[int, Dict[str, float]],
     np.ndarray,
     np.ndarray,
+    np.ndarray,
+    np.ndarray,
 ]:
     """Evaluate three-stage model with separate metrics per horizon for delayed/non-delayed.
     
-    For newer dual-regressor checkpoints, predictions are formed by gating/mixing:
-    delayed regressor vs non-delayed regressor.
+    Since the model uses classifier gating, predictions for delayed flights come through
+    the classifier gate, while non-delayed flights get zero predictions.
     
     Returns:
         - Classification metrics
@@ -173,11 +109,6 @@ def _evaluate_three_stage_per_horizon(
     targets_cls_list, targets_reg_list = [], []
     
     print("\n[EVALUATION] Processing test samples...")
-
-    # If the model has dual regressors attached (loaded from a newer checkpoint),
-    # we'll route predictions: delayed -> regressor_delayed, else -> regressor_nondelayed.
-    has_dual_regressors = hasattr(model, 'regressor_delayed') and hasattr(model, 'regressor_nondelayed')
-
     with torch.no_grad():
         for i in range(len(test_x)):
             data = Data(
@@ -187,22 +118,10 @@ def _evaluate_three_stage_per_horizon(
                 edge_index_od_t=edge_index_od_t,
             )
             
-            # Always compute classifier once.
-            hidden, node_logits = model.forward_classifier(data)
-            probs = torch.sigmoid(node_logits)
-
-            if has_dual_regressors:
-                hidden_dropped = model.dropout_reg(hidden)
-                reg_delayed = model.regressor_delayed(hidden_dropped)
-                reg_nondelayed = model.regressor_nondelayed(hidden_dropped)
-                # Soft gating: smoothly mix regressors based on delayed probability.
-                # class_threshold is treated as the midpoint (gate=0.5 when prob==threshold).
-                gate = torch.sigmoid((probs - class_threshold) * 10.0)
-                node_reg = reg_delayed * gate + reg_nondelayed * (1.0 - gate)
-            else:
-                node_reg = model.forward_regressor(hidden)
+            # Get predictions (classifier + regressor)
+            node_logits, node_reg = model(data)
             
-            logits_list.append(probs.cpu().numpy())
+            logits_list.append(torch.sigmoid(node_logits).cpu().numpy())
             reg_list.append(node_reg.cpu().numpy())
             targets_cls_list.append(test_y_cls[i].cpu().numpy())
             targets_reg_list.append(test_y_reg[i].cpu().numpy())
@@ -210,15 +129,10 @@ def _evaluate_three_stage_per_horizon(
             if (i + 1) % 1000 == 0 or (i + 1) == len(test_x):
                 print(f"  Processed {i+1}/{len(test_x)} samples...")
     
-    test_probs = np.concatenate(logits_list, axis=0)  # [num_samples * num_nodes, out_channels]
-    test_reg_preds = np.concatenate(reg_list, axis=0)  # [num_samples * num_nodes, out_channels]
-    test_cls_targets = np.concatenate(targets_cls_list, axis=0)  # [num_samples * num_nodes, out_channels]
-    test_reg_targets = np.concatenate(targets_reg_list, axis=0)  # [num_samples * num_nodes, out_channels]
-    
-    print(f"\n[DATA SHAPES] After concatenation:")
-    print(f"  Predictions shape: {test_reg_preds.shape}")
-    print(f"  Targets shape: {test_reg_targets.shape}")
-    print(f"  Classification probs shape: {test_probs.shape}")
+    test_probs = np.concatenate(logits_list, axis=0)  # (num_samples*num_nodes, out_channels)
+    test_reg_preds = np.concatenate(reg_list, axis=0)  # (num_samples*num_nodes, out_channels)
+    test_cls_targets = np.concatenate(targets_cls_list, axis=0)  # (num_samples*num_nodes, out_channels)
+    test_reg_targets = np.concatenate(targets_reg_list, axis=0)  # (num_samples*num_nodes, out_channels)
     
     # Classification metrics (per-channel: arrival/departure)
     test_cls_metrics = classification_metrics_per_channel(
@@ -227,13 +141,9 @@ def _evaluate_three_stage_per_horizon(
         channel_names=('arrival', 'departure'),
     )
     
-    # NOTE: If dual-regressor routing was applied per-sample above, predictions are
-    # already gated/combined. For legacy single-regressor models, keep delayed-only gating.
-    if has_dual_regressors:
-        gated_preds = test_reg_preds
-    else:
-        test_mask = (test_probs >= class_threshold)
-        gated_preds = test_reg_preds * test_mask
+    # Apply classifier gating (as done in training)
+    test_mask = (test_probs >= class_threshold)
+    gated_preds = test_reg_preds * test_mask
     
     print(f"\n[DENORMALIZATION] Checking predictions...")
     print(f"  Gated predictions shape: {gated_preds.shape}")
@@ -258,27 +168,11 @@ def _evaluate_three_stage_per_horizon(
     preds_denorm = np.maximum(0, preds_denorm)
     targets_denorm = np.maximum(0, targets_denorm)
     
-    # For single-horizon training (threestagev4noise), the predictions are already per-node
-    # Shape: [num_samples * num_nodes, delay_dim]
-    # We need to reshape to [num_samples, num_nodes, delay_dim] then aggregate per sample for per-horizon analysis
-    # However, since we're using node-level, we'll keep it flattened for consistency with training
-    
-    # Flatten both predictions and targets consistently for element-wise evaluation
-    preds_flat = preds_denorm.flatten()
-    targets_flat = targets_denorm.flatten()
-    
-    # Also create per-horizon view for detailed analysis (assuming single horizon)
-    # Shape assumption: [num_samples * num_nodes, delay_dim] where delay_dim = 2 (arrival, departure)
-    num_elements = preds_denorm.shape[0]
-    preds_h = preds_denorm.reshape(-1, num_forecast_steps, delay_dim) if num_forecast_steps > 0 else preds_denorm.reshape(-1, 1, delay_dim)
-    targets_h = targets_denorm.reshape(-1, num_forecast_steps, delay_dim) if num_forecast_steps > 0 else targets_denorm.reshape(-1, 1, delay_dim)
+    # Reshape for per-horizon analysis
+    preds_h = preds_denorm.reshape(-1, num_forecast_steps, delay_dim)
+    targets_h = targets_denorm.reshape(-1, num_forecast_steps, delay_dim)
     
     # Get ground truth masks based on ACTUAL delays (not predictions)
-    # Using flattened view for element-wise evaluation (consistent with threestagev4noise.py)
-    delayed_mask_flat = targets_flat >= delay_threshold
-    nondelayed_mask_flat = (targets_flat >= 1.0) & (targets_flat < delay_threshold)
-    
-    # Also compute per-sample masks for per-horizon analysis
     # Delayed: >= threshold
     true_delayed_mask = np.any(targets_h >= delay_threshold, axis=(1, 2))
     
@@ -286,8 +180,7 @@ def _evaluate_three_stage_per_horizon(
     # Exclude samples that are purely < 1 min (on time)
     true_nondelayed_mask = (~true_delayed_mask) & np.any(targets_h >= 1.0, axis=(1, 2))
     
-    print(f"\n[GROUND TRUTH] Delayed elements (flat): {delayed_mask_flat.sum()} | Non-delayed elements (flat): {nondelayed_mask_flat.sum()}")
-    print(f"[GROUND TRUTH] Delayed samples: {true_delayed_mask.sum()} | Non-delayed samples: {true_nondelayed_mask.sum()}")
+    print(f"\n[GROUND TRUTH] Delayed samples: {true_delayed_mask.sum()} | Non-delayed samples: {true_nondelayed_mask.sum()}")
     
     # Per-horizon metrics for DELAYED flights (>5 min)
     per_horizon_delayed_metrics: Dict[int, Dict[str, float]] = {}
@@ -429,6 +322,8 @@ def _evaluate_three_stage_per_horizon(
         per_horizon_overall_metrics,
         preds_h,
         targets_h,
+        test_probs,
+        test_cls_targets,
     )
 
 
@@ -439,170 +334,25 @@ def _load_three_stage_model(
     hidden_channels: int,
     device: torch.device,
 ) -> Tuple[SequentialTwoStagePredictor, float, float, Optional[float], bool]:
-    """Load threestagev4noise checkpoint and extract DP metadata.
-    
-    Auto-detects model architecture from checkpoint to match training configuration.
-    """
+    """Load threestagev4noise checkpoint and extract DP metadata."""
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Checkpoint not found: {model_path}")
-    
-    checkpoint = torch.load(model_path, map_location=device, weights_only=False)
-    
-    # Auto-detect architecture parameters from checkpoint
-    # NOTE: some checkpoints use classifier_out=1 (single gate) and regressor_out=2 (arrival/dep).
-    detected_out_channels = out_channels  # kept for backward compatibility; used for regressor/model out
-    detected_hidden_channels = hidden_channels
-    detected_classifier_out_channels: Optional[int] = None
-    detected_regressor_out_channels: Optional[int] = None
-    
-    print(f"\n[MODEL LOADING] Auto-detecting architecture from checkpoint...")
-    
-    if "encoder" in checkpoint and "classifier" in checkpoint:
-        # Detect hidden_channels from encoder's GAT layer
-        # GAT lin.weight shape is [heads * out_per_head, in_features] = [128, 40] for heads=2, hidden=64
-        for key, value in checkpoint["encoder"].items():
-            if "gat_adj.lin.weight" == key:
-                shape = value.shape
-                if len(shape) >= 2:
-                    # Shape is [heads * hidden_channels, in_features] = [128, 40] for heads=2, hidden=64
-                    detected_hidden_channels = shape[0] // 2  # Divide by number of heads (2 heads)
-                    print(f"  ✓ Detected hidden_channels={detected_hidden_channels} from encoder GAT layer (shape: {shape})")
-                    break
-
-        # Detect output dimensions from classifier/regressor OUTPUT layers.
-        # Some runs use classifier_out=1 (single probability gate) while regressor_out=delay_dim (often 2).
-        cls_w = checkpoint["classifier"].get("layers.1.base_weight")
-        if cls_w is not None and hasattr(cls_w, "shape") and len(cls_w.shape) >= 2:
-            detected_classifier_out_channels = int(cls_w.shape[0])
-            print(
-                f"  ✓ Detected classifier out={detected_classifier_out_channels} "
-                f"from classifier.layers.1.base_weight (shape: {tuple(cls_w.shape)})"
-            )
-
-        if "regressor" in checkpoint:
-            reg_w = checkpoint["regressor"].get("layers.1.base_weight")
-            if reg_w is not None and hasattr(reg_w, "shape") and len(reg_w.shape) >= 2:
-                detected_regressor_out_channels = int(reg_w.shape[0])
-                print(
-                    f"  ✓ Detected regressor out={detected_regressor_out_channels} "
-                    f"from regressor.layers.1.base_weight (shape: {tuple(reg_w.shape)})"
-                )
-
-        # For model construction we prioritize the regressor output dimension.
-        if detected_regressor_out_channels is not None:
-            detected_out_channels = detected_regressor_out_channels
-        elif detected_classifier_out_channels is not None:
-            detected_out_channels = detected_classifier_out_channels
-
-        # If classifier/regressor outputs differ, we will rebuild heads below before loading weights.
-        # Check for mismatches and adjust
-        architecture_mismatch = False
-        if detected_out_channels != out_channels:
-            print(f"  ⚠️  Output channels mismatch: Expected {out_channels}, Found {detected_out_channels}")
-            architecture_mismatch = True
-            
-        if detected_hidden_channels != hidden_channels:
-            print(f"  ⚠️  Hidden channels mismatch: Expected {hidden_channels}, Found {detected_hidden_channels}")
-            architecture_mismatch = True
-        
-        if architecture_mismatch:
-            print(f"  → Adjusting model architecture to match checkpoint...")
-            out_channels = detected_out_channels
-            hidden_channels = detected_hidden_channels
-        else:
-            print(f"  ✓ Architecture matches: out_channels={out_channels}, hidden_channels={hidden_channels}")
-    
-    # Create model with detected dimensions (matching threestagev4noise.py exactly)
-    print(f"\n[MODEL CREATION] Creating model with:")
-    print(f"  in_channels={in_channels}")
-    print(f"  out_channels={out_channels}")
-    print(f"  hidden_channels={hidden_channels}")
     
     model = SequentialTwoStagePredictor(
         in_channels=in_channels,
         out_channels=out_channels,
         hidden_channels=hidden_channels,
     ).to(device)
-
-    # If checkpoint uses different classifier/regressor output sizes than the constructor ties together,
-    # rebuild the heads to match checkpoint exactly before loading weights.
-    if detected_classifier_out_channels is not None or detected_regressor_out_channels is not None:
-        embed_dim = hidden_channels
-        hidden_head = max(1, embed_dim // 2)
-
-        # Always ensure regressor matches checkpoint (if provided).
-        if detected_regressor_out_channels is not None and detected_regressor_out_channels != out_channels:
-            out_channels = detected_regressor_out_channels
-
-        # Replace regressor to match inferred output (safe even if already correct).
-        reg_out = detected_regressor_out_channels if detected_regressor_out_channels is not None else out_channels
-        model.regressor = model.regressor.__class__(
-            layers_hidden=[embed_dim, hidden_head, int(reg_out)],
-            grid_size=3,
-            spline_order=2,
-        ).to(device)
-
-        # Replace classifier if checkpoint indicates a different output size.
-        if detected_classifier_out_channels is not None:
-            cls_out = int(detected_classifier_out_channels)
-            model.classifier = model.classifier.__class__(
-                layers_hidden=[embed_dim, hidden_head, cls_out],
-                grid_size=3,
-                spline_order=2,
-            ).to(device)
-
-        if detected_classifier_out_channels is not None and detected_regressor_out_channels is not None:
-            if detected_classifier_out_channels != detected_regressor_out_channels:
-                print(
-                    f"  ⚠️  Checkpoint uses different head outputs: classifier_out={detected_classifier_out_channels}, "
-                    f"regressor_out={detected_regressor_out_channels}. Using separate heads (classifier=gate, regressor=delay dims)."
-                )
     
-    # Load model weights (matching threestagev4noise.py checkpoint structure)
-    print(f"\n[WEIGHTS LOADING] Loading model weights from checkpoint...")
+    checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+    
+    # Load model weights
     if all(key in checkpoint for key in ("encoder", "classifier", "regressor")):
-        try:
-            model.encoder.load_state_dict(checkpoint["encoder"])
-            model.classifier.load_state_dict(checkpoint["classifier"])
-            model.regressor.load_state_dict(checkpoint["regressor"])
-
-            # Optional: dual-regressor checkpoints (Stage 2 delayed + Stage 3 non-delayed)
-            if "regressor_delayed" in checkpoint and "regressor_nondelayed" in checkpoint:
-                model.regressor_delayed = copy.deepcopy(model.regressor).to(device)
-                model.regressor_nondelayed = copy.deepcopy(model.regressor).to(device)
-                model.regressor_delayed.load_state_dict(checkpoint["regressor_delayed"])
-                model.regressor_nondelayed.load_state_dict(checkpoint["regressor_nondelayed"])
-
-            print(f"  ✓ Successfully loaded three-stage model weights")
-            print(f"     - Encoder: trained with 3 GAT layers (adj, od, od_t)")
-            print(f"     - Classifier: trained in Stage 1 (delay classification)")
-            if hasattr(model, 'regressor_delayed') and hasattr(model, 'regressor_nondelayed'):
-                print(f"     - Regressor (delayed): Stage 2")
-                print(f"     - Regressor (non-delayed): Stage 3")
-            else:
-                print(f"     - Regressor: single head (legacy checkpoint)")
-        except RuntimeError as e:
-            print(f"  ✗ Error loading model weights: {e}")
-            print(f"\n  Attempting to load with strict=False...")
-            missing_keys_enc = model.encoder.load_state_dict(checkpoint["encoder"], strict=False)
-            missing_keys_cls = model.classifier.load_state_dict(checkpoint["classifier"], strict=False)
-            missing_keys_reg = model.regressor.load_state_dict(checkpoint["regressor"], strict=False)
-
-            if "regressor_delayed" in checkpoint and "regressor_nondelayed" in checkpoint:
-                model.regressor_delayed = copy.deepcopy(model.regressor).to(device)
-                model.regressor_nondelayed = copy.deepcopy(model.regressor).to(device)
-                model.regressor_delayed.load_state_dict(checkpoint["regressor_delayed"], strict=False)
-                model.regressor_nondelayed.load_state_dict(checkpoint["regressor_nondelayed"], strict=False)
-
-            print(f"  ⚠️  Loaded with strict=False")
-            if missing_keys_enc.missing_keys or missing_keys_enc.unexpected_keys:
-                print(f"     Encoder issues: {missing_keys_enc}")
-            if missing_keys_cls.missing_keys or missing_keys_cls.unexpected_keys:
-                print(f"     Classifier issues: {missing_keys_cls}")
-            if missing_keys_reg.missing_keys or missing_keys_reg.unexpected_keys:
-                print(f"     Regressor issues: {missing_keys_reg}")
+        model.encoder.load_state_dict(checkpoint["encoder"])
+        model.classifier.load_state_dict(checkpoint["classifier"])
+        model.regressor.load_state_dict(checkpoint["regressor"])
+        print("✓ Loaded three-stage trained model (regressor trained on both delayed and non-delayed)")
     else:
-        print(f"  ⚠️  Checkpoint missing standard keys, attempting full model load...")
         model.load_state_dict(checkpoint)
     
     # Extract DP metadata
@@ -650,7 +400,7 @@ def parse_args() -> argparse.Namespace:
         help="Single forecast horizon (must match threestagev4noise training run).",
     )
     parser.add_argument("--delay_threshold", type=float, default=5.0)
-    parser.add_argument("--class_threshold", type=float, default=0.6)
+    parser.add_argument("--class_threshold", type=float, default=0.5)
     parser.add_argument("--use_node_level", action="store_true", default=True, help="Use node-level labels")
     parser.add_argument("--weather_file", type=str, default="weather_cn.npy")
     parser.add_argument("--period_hours", type=int, default=24)
@@ -676,7 +426,7 @@ def save_results_table(
     model_path: str,
     args,
 ) -> None:
-    """Save comprehensive results table with all metrics (consistent with threestagev4noise.py output format)."""
+    """Save comprehensive results table with all metrics."""
     
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -690,19 +440,14 @@ def save_results_table(
         # Model and configuration info
         writer.writerow(["MODEL INFORMATION"])
         writer.writerow(["Model Path", model_path])
-        writer.writerow(["Model Type", "Three-Stage DP (threestagev4noise)"])
+        writer.writerow(["Model Type", "Three-Stage DP"])
         writer.writerow(["Data Source", args.data_source])
         writer.writerow(["Sequence Length", args.seq_len])
-        writer.writerow(["Forecast Horizon", horizons[0] if len(horizons) == 1 else horizons])
         writer.writerow(["Delay Threshold", f"{args.delay_threshold} min"])
         writer.writerow(["Classification Threshold", args.class_threshold])
-        writer.writerow(["Hidden Channels", args.hidden_channels])
         writer.writerow(["Final Epsilon", f"{epsilon:.3f}"])
         if target_epsilon is not None:
             writer.writerow(["Target Epsilon", f"{target_epsilon:.3f}"])
-            if epsilon > target_epsilon:
-                overshoot = epsilon - target_epsilon
-                writer.writerow(["Epsilon Overshoot", f"{overshoot:.3f} ({overshoot/target_epsilon*100:.1f}%)"])
         writer.writerow(["Final Delta", f"{delta:.2e}"])
         writer.writerow(["Epsilon Exceeded", epsilon_exceeded])
         writer.writerow([])
@@ -904,7 +649,7 @@ def main() -> None:
         args.seq_len,
         max_horizon,
         args.delay_threshold,
-        horizons,  # FIXED: Use positional argument to match training file
+        target_horizons=horizons,
     )
     
     edge_indices = (
@@ -953,13 +698,6 @@ def main() -> None:
     print(f"  Results Table: {args.results_table_csv}")
     print(f"  Predictions: {args.predictions_csv}")
     
-    print(f"\n[CONFIGURATION]")
-    print(f"  Horizon: {horizons[0]}-step ahead")
-    print(f"  Hidden channels: {args.hidden_channels}")
-    print(f"  Delay threshold: {args.delay_threshold} min")
-    print(f"  Classification threshold: {args.class_threshold}")
-    print(f"  Using node-level labels: {args.use_node_level}")
-    
     # Evaluate
     (
         cls_metrics,
@@ -968,6 +706,8 @@ def main() -> None:
         per_horizon_overall_metrics,
         preds_h,
         targets_h,
+        test_probs,
+        test_cls_targets,
     ) = _evaluate_three_stage_per_horizon(
         model,
         edge_indices,
@@ -981,6 +721,76 @@ def main() -> None:
         args.class_threshold,
         args.delay_threshold,
     )
+
+    # Visualizations (saved as PNGs)
+    if VISUALIZATION_AVAILABLE:
+        print("\n[VISUALIZATION] Generating evaluation plots...")
+        try:
+            # preds_h/targets_h: (N, num_horizons, delay_dim). This script enforces single horizon.
+            preds_2d = preds_h[:, 0, :] if preds_h.ndim == 3 else preds_h
+            targets_2d = targets_h[:, 0, :] if targets_h.ndim == 3 else targets_h
+
+            # Use arrival channel (0) for classification/regression combo plots (consistent with training script).
+            if test_probs.ndim > 1 and test_probs.shape[1] > 1:
+                y_pred_cls = (test_probs[:, 0] >= args.class_threshold).astype(int)
+                y_true_cls = (test_cls_targets[:, 0] >= 0.5).astype(int)
+            else:
+                y_pred_cls = (test_probs.reshape(-1) >= args.class_threshold).astype(int)
+                y_true_cls = (test_cls_targets.reshape(-1) >= 0.5).astype(int)
+
+            y_reg_true_arrival = targets_2d[:, 0].reshape(-1) if targets_2d.ndim > 1 else targets_2d.reshape(-1)
+            y_reg_pred_arrival = preds_2d[:, 0].reshape(-1) if preds_2d.ndim > 1 else preds_2d.reshape(-1)
+
+            visualize_classification_results(
+                y_true_cls,
+                y_pred_cls,
+                y_reg_true_arrival,
+                y_reg_pred_arrival,
+                threshold=args.delay_threshold,
+                save_path=f"eval_classification_results_{eps_str}_{timestamp}.png",
+            )
+
+            visualize_regression_timeseries(
+                targets_2d,
+                preds_2d,
+                title="Regression Over Time (True vs Predicted)",
+                xlabel="Time (sample index)",
+                ylabel="Delay (minutes)",
+                save_path=f"eval_regression_timeseries_{eps_str}_{timestamp}.png",
+            )
+
+            visualize_regression_after_classification(
+                y_reg_true_arrival,
+                y_reg_pred_arrival,
+                y_true_cls,
+                y_pred_cls,
+                threshold=args.delay_threshold,
+                stage="Evaluation (Arrival)",
+                save_path=f"eval_regression_results_{eps_str}_{timestamp}.png",
+            )
+
+            results_dict = {
+                "y_true_cls": y_true_cls,
+                "y_pred_cls": y_pred_cls,
+                "y_true_reg": y_reg_true_arrival,
+                # This evaluation script does not separate stage2/stage3 regressors; reuse final preds.
+                "y_pred_stage2": y_reg_pred_arrival,
+                "y_pred_stage3": y_reg_pred_arrival,
+                "final_predictions": y_reg_pred_arrival,
+            }
+            visualize_three_stage_pipeline(
+                results_dict,
+                threshold=args.delay_threshold,
+                save_path=f"eval_three_stage_pipeline_{eps_str}_{timestamp}.png",
+            )
+
+            print("  ✓ Saved evaluation plots:")
+            print(f"    - eval_classification_results_{eps_str}_{timestamp}.png")
+            print(f"    - eval_regression_timeseries_{eps_str}_{timestamp}.png")
+            print(f"    - eval_regression_results_{eps_str}_{timestamp}.png")
+            print(f"    - eval_three_stage_pipeline_{eps_str}_{timestamp}.png")
+        except Exception as e:
+            print(f"  ✗ Error generating evaluation plots: {e}")
     
     # Print results
     print("\n" + "="*80)

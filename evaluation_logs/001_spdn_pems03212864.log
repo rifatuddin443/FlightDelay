@@ -1,0 +1,20 @@
+# [2/114] spdn_pems03212864
+# CMD: python evaluate_regression_v4.py --checkpoint D:\flight delay\stpn paper\STPN-main\PeMS\spdn_pems03212864.pth
+
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'pyg-lib'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-scatter'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-cluster'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-spline-conv'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-sparse'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+forrtl: error (200): program aborting due to window-CLOSE event
+Image              PC                Routine            Line        Source             
+KERNELBASE.dll     00007FFC06603867  Unknown               Unknown  Unknown
+KERNEL32.DLL       00007FFC0849259D  Unknown               Unknown  Unknown
+ntdll.dll          00007FFC091CAF78  Unknown               Unknown  Unknown
+^C
+# FAILED with exit code 3221225786

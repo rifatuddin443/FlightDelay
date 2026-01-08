@@ -505,6 +505,101 @@ def visualize_regression_after_classification(
     plt.show()
 
 
+def visualize_regression_timeseries(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    title: str = "Regression Results Over Time",
+    xlabel: str = "Time (sample index)",
+    ylabel: str = "Delay (minutes)",
+    max_points: int = 2000,
+    save_path: Optional[str] = None,
+    channel_names: Tuple[str, str] = ("arrival", "departure"),
+):
+    """Plot true vs predicted delay over time (sample index) on a single graph.
+
+    This is useful for visually inspecting how predictions track the real delay
+    sequence across the evaluation set.
+
+    Args:
+        y_true: True delay values, shape (N,)
+        y_pred: Predicted delay values, shape (N,)
+        title: Plot title
+        xlabel: X-axis label
+        ylabel: Y-axis label
+        max_points: Downsample to at most this many points for readability/perf
+        save_path: Path to save figure
+    """
+    y_true_arr = np.asarray(y_true)
+    y_pred_arr = np.asarray(y_pred)
+
+    if y_true_arr.size == 0 or y_pred_arr.size == 0:
+        print("[VISUALIZATION] No regression samples to plot (empty arrays)")
+        return
+
+    # Normalize shapes.
+    # Supported:
+    # - (N,) / (N,1): single-channel
+    # - (N,2): two-channel (arrival, departure)
+    if y_true_arr.ndim == 1:
+        y_true_arr = y_true_arr.reshape(-1, 1)
+    if y_pred_arr.ndim == 1:
+        y_pred_arr = y_pred_arr.reshape(-1, 1)
+
+    n = min(y_true_arr.shape[0], y_pred_arr.shape[0])
+    c = min(y_true_arr.shape[1], y_pred_arr.shape[1])
+    y_true_arr = y_true_arr[:n, :c]
+    y_pred_arr = y_pred_arr[:n, :c]
+
+    if n == 0 or c == 0:
+        print("[VISUALIZATION] No regression samples to plot after alignment")
+        return
+
+    # Downsample consistently across channels.
+    if max_points is not None and max_points > 0 and n > max_points:
+        step = int(np.ceil(n / max_points))
+        idx = np.arange(0, n, step)
+    else:
+        idx = np.arange(n)
+
+    x = idx
+    y_true_plot = y_true_arr[idx]
+    y_pred_plot = y_pred_arr[idx]
+
+    # Two-channel: requested two subplots.
+    if c >= 2:
+        fig, axes = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
+        fig.suptitle(title, fontsize=14, fontweight="bold")
+
+        for i, ax in enumerate(axes[:2]):
+            ch_name = channel_names[i] if i < len(channel_names) else f"ch{i}"
+            ax.plot(x, y_true_plot[:, i], label=f"True ({ch_name})", color="black", linewidth=2, alpha=0.85)
+            ax.plot(x, y_pred_plot[:, i], label=f"Predicted ({ch_name})", color="tab:orange", linewidth=2, alpha=0.85)
+            ax.set_ylabel(ylabel, fontsize=12)
+            ax.set_title(f"{ch_name}", fontsize=12, fontweight="bold")
+            ax.grid(True, alpha=0.3)
+            ax.legend()
+
+        axes[-1].set_xlabel(xlabel, fontsize=12)
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+    else:
+        plt.figure(figsize=(14, 6))
+        plt.plot(x, y_true_plot[:, 0], label="True Delay", color="black", linewidth=2, alpha=0.85)
+        plt.plot(x, y_pred_plot[:, 0], label="Predicted Delay", color="tab:orange", linewidth=2, alpha=0.85)
+
+        plt.title(title, fontsize=14, fontweight="bold")
+        plt.xlabel(xlabel, fontsize=12)
+        plt.ylabel(ylabel, fontsize=12)
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        print(f"Figure saved to {save_path}")
+
+    plt.show()
+
+
 def visualize_three_stage_pipeline(
     results_dict: Dict,
     threshold: float = 5.0,

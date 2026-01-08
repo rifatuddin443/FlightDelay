@@ -1,0 +1,105 @@
+# [9/10] kan_gat_dp_three_stage_sigma1_00_20260107_132357
+# Model: D:\flight delay\stpn paper\STPN-main\kan_gat_dp_three_stage_sigma1_00_20260107_132357.pth
+
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'pyg-lib'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-scatter'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-cluster'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-spline-conv'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-sparse'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+Device: cuda
+
+Node-level balance: 24.20% delayed 
+✓ Loaded three-stage trained model (regressor trained on both delayed and non-delayed)
+
+Loaded three-stage DP model from: D:\flight delay\stpn paper\STPN-main\kan_gat_dp_three_stage_sigma1_00_20260107_132357.pth
+Final ε: 101.909
+Final δ: 1.00e-05
+Target ε: 11.000 | Status: EXCEEDED
+⚠️  Checkpoint reports epsilon budget exceeded during training.
+
+Output files will be:
+  Summary: three_stage_test_summary_eps101_91_20260108_002638.csv
+  Results Table: results_table_eps101_91_20260108_002638.csv
+  Predictions: three_stage_test_predictions_eps101_91_20260108_002638.csv
+
+[EVALUATION] Processing test samples...
+  Processed 1000/5474 samples...
+  Processed 2000/5474 samples...
+  Processed 3000/5474 samples...
+  Processed 4000/5474 samples...
+  Processed 5000/5474 samples...
+  Processed 5474/5474 samples...
+
+[DENORMALIZATION] Checking predictions...
+  Gated predictions shape: (273700, 2)
+  Gated predictions (scaled): min=0.000, max=1.136, mean=0.322
+  Test targets (scaled): min=-1.263, max=1.904, mean=-0.004
+  Applying inverse transform with scaler...
+    Scaler mean: 2.948054003341035, std: 14.205604184408468
+  After denormalization:
+    Predictions: min=2.95, max=19.09, mean=7.52
+    Targets: min=-15.00, max=30.00, mean=2.89
+
+[GROUND TRUTH] Delayed samples: 97640 | Non-delayed samples: 137069
+
+================================================================================
+TEST RESULTS - THREE-STAGE MODEL
+================================================================================
+
+CLASSIFICATION METRICS (macro over arrival/departure):
+  Precision: 0.4175 | Recall: 0.8021 | F1: 0.5477 | Accuracy: 0.6818
+  Per-channel:
+    Arrival   - P: 0.4247 R: 0.7286 F1: 0.5366 Acc: 0.6679
+    Departure - P: 0.4103 R: 0.8756 F1: 0.5588 Acc: 0.6958
+
+================================================================================
+PER-HORIZON RESULTS FOR DELAYED FLIGHTS (>5 min)
+================================================================================
+
+12-STEP AHEAD PREDICTIONS (Delayed Flights):
+  Samples: 97640
+  Arrival Delay:
+    MAE: 9.3726 min | RMSE: 11.4799 min | R²: -0.3227
+    Mean Predicted: 10.87 min | Mean Target: 12.81 min
+  Departure Delay:
+    MAE: 7.6701 min | RMSE: 9.9726 min | R²: -0.0067
+    Mean Predicted: 10.35 min | Mean Target: 11.11 min
+
+================================================================================
+PER-HORIZON RESULTS FOR NON-DELAYED FLIGHTS (<5 min)
+================================================================================
+NOTE: Stage 3 trains the regressor on non-delayed flights to produce accurate small delays
+
+12-STEP AHEAD PREDICTIONS (Non-Delayed Flights):
+  Samples: 137069
+  Arrival Delay:
+    MAE: 2.2612 min | RMSE: 4.8159 min | R²: -16.2509
+    Mean Predicted: 4.66 min | Mean Target: 2.42 min
+  Departure Delay:
+    MAE: 2.1500 min | RMSE: 4.5336 min | R²: -13.9846
+    Mean Predicted: 4.54 min | Mean Target: 2.40 min
+
+================================================================================
+PER-HORIZON RESULTS FOR ALL FLIGHTS (OVERALL)
+================================================================================
+
+12-STEP AHEAD PREDICTIONS (All Flights):
+  Samples: 273700
+  Arrival Delay:
+    MAE: 5.9310 min | RMSE: 8.7619 min | R²: -0.1951
+    Mean Predicted: 7.67 min | Mean Target: 5.78 min
+  Departure Delay:
+    MAE: 5.2148 min | RMSE: 7.8834 min | R²: -0.1073
+    Mean Predicted: 7.37 min | Mean Target: 5.17 min
+
+✓ Summary saved to: three_stage_test_summary_eps101_91_20260108_002638.csv
+
+✓ Comprehensive results table saved to: results_table_eps101_91_20260108_002638.csv
+✓ Predictions saved to: three_stage_test_predictions_eps101_91_20260108_002638.csv
+
+# OK

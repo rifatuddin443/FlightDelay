@@ -1,0 +1,130 @@
+# [3/3] kan_gat_dp_three_stage_sigma1_00_20260107_170117
+# Model: D:\flight delay\stpn paper\STPN-main\kan_gat_dp_three_stage_sigma1_00_20260107_170117.pth
+
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'pyg-lib'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-scatter'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-cluster'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-spline-conv'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-sparse'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+Device: cuda
+
+Node-level balance: 24.20% delayed 
+✓ Loaded three-stage trained model (regressor trained on both delayed and non-delayed)
+
+Loaded three-stage DP model from: D:\flight delay\stpn paper\STPN-main\kan_gat_dp_three_stage_sigma1_00_20260107_170117.pth
+Final ε: 101.909
+Final δ: 1.00e-05
+Target ε: 11.000 | Status: EXCEEDED
+⚠️  Checkpoint reports epsilon budget exceeded during training.
+
+Output files will be:
+  Summary: three_stage_test_summary_eps101_91_20260108_150037.csv
+  Results Table: results_table_eps101_91_20260108_150037.csv
+  Predictions: three_stage_test_predictions_eps101_91_20260108_150037.csv
+
+[EVALUATION] Processing test samples...
+  Processed 1000/5474 samples...
+  Processed 2000/5474 samples...
+  Processed 3000/5474 samples...
+  Processed 4000/5474 samples...
+  Processed 5000/5474 samples...
+  Processed 5474/5474 samples...
+
+[DENORMALIZATION] Checking predictions...
+  Gated predictions shape: (273700, 2)
+  Gated predictions (scaled): min=-0.139, max=1.439, mean=0.303
+  Test targets (scaled): min=-1.263, max=1.904, mean=-0.004
+  Applying inverse transform with scaler...
+    Scaler mean: 2.948054003341035, std: 14.205604184408468
+  After denormalization:
+    Predictions: min=0.98, max=23.39, mean=7.26
+    Targets: min=-15.00, max=30.00, mean=2.89
+
+[GROUND TRUTH] Delayed samples: 97640 | Non-delayed samples: 137069
+
+[VISUALIZATION] Generating evaluation plots...
+D:\flight delay\stpn paper\STPN-main\visualize_training_classification.py:355: UserWarning: This figure includes Axes that are not compatible with tight_layout, so results might be incorrect.
+  plt.tight_layout()
+D:\flight delay\stpn paper\STPN-main\visualize_training_classification.py:358: UserWarning: Creating legend with loc="best" can be slow with large amounts of data.
+  plt.savefig(save_path, dpi=300, bbox_inches='tight')
+Figure saved to eval_classification_results_eps101_91_20260108_150037.png
+D:\flight delay\stpn paper\STPN-main\visualize_training_classification.py:361: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+  plt.show()
+Figure saved to eval_regression_timeseries_eps101_91_20260108_150037.png
+D:\flight delay\stpn paper\STPN-main\visualize_training_classification.py:600: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+  plt.show()
+Figure saved to eval_regression_results_eps101_91_20260108_150037.png
+D:\flight delay\stpn paper\STPN-main\visualize_training_classification.py:505: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+  plt.show()
+D:\flight delay\stpn paper\STPN-main\visualize_training_classification.py:771: UserWarning: This figure includes Axes that are not compatible with tight_layout, so results might be incorrect.
+  plt.tight_layout()
+Figure saved to eval_three_stage_pipeline_eps101_91_20260108_150037.png
+D:\flight delay\stpn paper\STPN-main\visualize_training_classification.py:777: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+  plt.show()
+  ✓ Saved evaluation plots:
+    - eval_classification_results_eps101_91_20260108_150037.png
+    - eval_regression_timeseries_eps101_91_20260108_150037.png
+    - eval_regression_results_eps101_91_20260108_150037.png
+    - eval_three_stage_pipeline_eps101_91_20260108_150037.png
+
+================================================================================
+TEST RESULTS - THREE-STAGE MODEL
+================================================================================
+
+CLASSIFICATION METRICS (macro over arrival/departure):
+  Precision: 0.4275 | Recall: 0.8247 | F1: 0.5626 | Accuracy: 0.6908
+  Per-channel:
+    Arrival   - P: 0.4365 R: 0.7899 F1: 0.5623 Acc: 0.6753
+    Departure - P: 0.4185 R: 0.8595 F1: 0.5629 Acc: 0.7063
+
+================================================================================
+PER-HORIZON RESULTS FOR DELAYED FLIGHTS (>5 min)
+================================================================================
+
+12-STEP AHEAD PREDICTIONS (Delayed Flights):
+  Samples: 97640
+  Arrival Delay:
+    MAE: 8.9603 min | RMSE: 11.0680 min | R²: -0.2295
+    Mean Predicted: 10.42 min | Mean Target: 12.81 min
+  Departure Delay:
+    MAE: 7.6713 min | RMSE: 9.9693 min | R²: -0.0060
+    Mean Predicted: 10.14 min | Mean Target: 11.11 min
+
+================================================================================
+PER-HORIZON RESULTS FOR NON-DELAYED FLIGHTS (<5 min)
+================================================================================
+NOTE: Stage 3 trains the regressor on non-delayed flights to produce accurate small delays
+
+12-STEP AHEAD PREDICTIONS (Non-Delayed Flights):
+  Samples: 137069
+  Arrival Delay:
+    MAE: 2.1622 min | RMSE: 4.4767 min | R²: -13.9069
+    Mean Predicted: 4.56 min | Mean Target: 2.42 min
+  Departure Delay:
+    MAE: 2.0322 min | RMSE: 4.3478 min | R²: -12.7819
+    Mean Predicted: 4.42 min | Mean Target: 2.40 min
+
+================================================================================
+PER-HORIZON RESULTS FOR ALL FLIGHTS (OVERALL)
+================================================================================
+
+12-STEP AHEAD PREDICTIONS (All Flights):
+  Samples: 273700
+  Arrival Delay:
+    MAE: 5.6124 min | RMSE: 8.3008 min | R²: -0.0726
+    Mean Predicted: 7.34 min | Mean Target: 5.78 min
+  Departure Delay:
+    MAE: 5.1015 min | RMSE: 7.7700 min | R²: -0.0757
+    Mean Predicted: 7.18 min | Mean Target: 5.17 min
+
+✓ Summary saved to: three_stage_test_summary_eps101_91_20260108_150037.csv
+
+✓ Comprehensive results table saved to: results_table_eps101_91_20260108_150037.csv
+✓ Predictions saved to: three_stage_test_predictions_eps101_91_20260108_150037.csv
+
+# OK

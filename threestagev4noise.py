@@ -16,6 +16,7 @@ import copy
 import os
 import sys
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional
@@ -56,7 +57,8 @@ from baseline_methods import test_error  # noqa: E402
 try:
     from visualize_training_classification import (
         visualize_training_data,
-        visualize_classification_results
+        visualize_classification_results,
+        visualize_regression_timeseries,
     )
     VISUALIZATION_AVAILABLE = True
 except ImportError:
@@ -248,6 +250,7 @@ def classification_metrics_per_channel(
     preds: np.ndarray,
     targets: np.ndarray,
     channel_names: Tuple[str, ...] = ("arrival", "departure"),
+    prob_threshold: float = 0.5,
 ) -> Dict[str, float]:
     """Compute precision/recall/F1/accuracy per output channel.
 
@@ -261,7 +264,7 @@ def classification_metrics_per_channel(
     metrics: Dict[str, float] = {}
     precisions, recalls, f1s, accuracies = [], [], [], []
     for c in range(n_channels):
-        preds_bin = preds_2d[:, c] >= 0.5
+        preds_bin = preds_2d[:, c] >= prob_threshold
         targets_bin = targets_2d[:, c] >= 0.5
 
         tp = np.logical_and(preds_bin, targets_bin).sum()
@@ -504,18 +507,18 @@ def train_stage1_with_dp(
                     len(batch_indices),
                 )
                 # Track gradient norms for diagnostics
-                for name, param in model.named_parameters():
-                    if param.requires_grad and name in noisy_grads:
-                        param.grad = noisy_grads[name]
+                # for name, param in model.named_parameters():
+                #     if param.requires_grad and name in noisy_grads:
+                #         param.grad = noisy_grads[name]
                 
                 # Log gradient statistics every 10 batches
-                if start_idx % (batch_size * 10) == 0 and epoch % 5 == 0:
-                    noise_scale = dp_config.noise_multiplier * dp_config.max_grad_norm / len(batch_indices)
-                    snr = grad_diagnostics['mean_grad_norm_before_clip'] / (noise_scale + 1e-10)
-                    print(f"    Batch {start_idx//batch_size}: Pre-clip norm: {grad_diagnostics['mean_grad_norm_before_clip']:.3f}, "
-                          f"Clip ratio: {grad_diagnostics['mean_clip_ratio']:.3f}, "
-                          f"% Clipped: {grad_diagnostics['pct_clipped']:.1f}%, "
-                          f"SNR: {snr:.2f}")
+                # if start_idx % (batch_size * 10) == 0 and epoch % 5 == 0:
+                #     noise_scale = dp_config.noise_multiplier * dp_config.max_grad_norm / len(batch_indices)
+                #     snr = grad_diagnostics['mean_grad_norm_before_clip'] / (noise_scale + 1e-10)
+                #     print(f"    Batch {start_idx//batch_size}: Pre-clip norm: {grad_diagnostics['mean_grad_norm_before_clip']:.3f}, "
+                #           f"Clip ratio: {grad_diagnostics['mean_clip_ratio']:.3f}, "
+                #           f"% Clipped: {grad_diagnostics['pct_clipped']:.1f}%, "
+                #           f"SNR: {snr:.2f}")
                 
                 # Loss for logging
                 with torch.no_grad():
@@ -1319,6 +1322,7 @@ def final_evaluation(
         test_probs,
         test_cls_targets,
         channel_names=("arrival", "departure"),
+        prob_threshold=class_threshold,
     )
     
     # NOTE: If a dual-regressor checkpoint was loaded, routing was already applied
@@ -1431,10 +1435,20 @@ def final_evaluation(
                 test_cls_pred,
                 test_reg_true,
                 test_reg_pred,
-                threshold=class_threshold,
+                threshold=delay_threshold,
                 save_path=f"classification_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
             )
             print("  ✓ Classification results visualization saved")
+
+            visualize_regression_timeseries(
+                targets_denorm,
+                preds_denorm,
+                title="Regression Over Time (True vs Predicted)",
+                xlabel="Time (sample index)",
+                ylabel="Delay (minutes)",
+                save_path=f"regression_timeseries_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+            )
+            print("  ✓ Regression time-series visualization saved")
         except Exception as e:
             print(f"  ✗ Error generating classification results visualization: {e}")
     
@@ -1582,13 +1596,13 @@ def parse_args() -> argparse.Namespace:
         help='Train/test ONLY this horizon (choose one of 3, 6, 12, 24). Example: --horizons 24',
     )
     parser.add_argument('--delay_threshold', type=float, default=5.0)
-    parser.add_argument('--class_threshold', type=float, default=0.6)
+    parser.add_argument('--class_threshold', type=float, default=0.5)
     parser.add_argument('--use_node_level', action='store_true', default=True, help='Use node-level labels')
     parser.add_argument('--weather_file', type=str, default='weather_cn.npy')
     parser.add_argument('--period_hours', type=int, default=24)
     parser.add_argument('--stage1_epochs', type=int, default=10)
     parser.add_argument('--stage2_epochs', type=int, default=8)
-    parser.add_argument('--stage3_epochs', type=int, default=8, help='Epochs for non-delayed regressor')
+    parser.add_argument('--stage3_epochs', type=int, default=12, help='Epochs for non-delayed regressor')
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--lr', type=float, default=0.005)
     parser.add_argument('--patience', type=int, default=5)
@@ -1600,6 +1614,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--sample_rate', type=float, default=0.02)
     parser.add_argument('--epsilon_tolerance', type=float, default=0.05)
     parser.add_argument('--model_path', type=str, default='kan_gat_dp_three_stage.pth')
+    parser.add_argument(
+        '--checkpoint_dir',
+        type=str,
+        default='auto',
+        help=(
+            "Where to save/load stage checkpoints. "
+            "Use 'auto' to create a new per-run subfolder under ./checkpoints, "
+            "use 'latest' to reuse the most recent run folder, "
+            "or pass an explicit folder name/path."
+        ),
+    )
     parser.add_argument('--seed', type=int, default=None, help='Random seed (None for random)')
     parser.add_argument('--balance_50_50', action='store_true', default=False, help='Apply random undersampling to achieve 50-50 class balance')
     return parser.parse_args()
@@ -1608,10 +1633,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     global CHECKPOINT_DIR
     args = parse_args()
-    
-    # Set up checkpoint directory if not already set
-    if not CHECKPOINT_DIR:
-        CHECKPOINT_DIR = setup_checkpoint_directory()
+
+    # Always pick checkpoint directory from args, so re-runs can resume consistently.
+    CHECKPOINT_DIR = setup_checkpoint_directory(args.checkpoint_dir)
     
     if args.data_source == 'udata':
         args.weather_file = 'weather2016_2021.npy'
@@ -1869,7 +1893,7 @@ def main() -> None:
     )
 
 
-def setup_checkpoint_directory():
+def setup_checkpoint_directory(checkpoint_dir: str = 'auto') -> str:
     from pathlib import Path
     try:
         from google.colab import drive
@@ -1885,8 +1909,46 @@ def setup_checkpoint_directory():
         print("✓ Checkpoints will be saved locally.")
         base_path = "./checkpoints"
 
-    Path(base_path).mkdir(parents=True, exist_ok=True)
-    return base_path 
+    base_dir = Path(base_path)
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    latest_file = base_dir / "latest_run.txt"
+
+    def _write_latest(path: Path) -> None:
+        try:
+            latest_file.write_text(str(path), encoding="utf-8")
+        except Exception:
+            # Don't fail training just because we can't write the marker.
+            pass
+
+    # Resolve run directory
+    ck = (checkpoint_dir or "auto").strip().lower()
+
+    if ck in {"auto", "new"}:
+        # Create a unique subfolder per run so parallel debugger runs don't overwrite checkpoints.
+        run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_pid{os.getpid()}_{uuid.uuid4().hex[:6]}"
+        run_dir = base_dir / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        _write_latest(run_dir)
+    elif ck == "latest":
+        if not latest_file.exists():
+            raise FileNotFoundError(
+                f"No latest run marker found at {latest_file}. "
+                f"Run once with --checkpoint_dir auto to create it, or pass an explicit --checkpoint_dir."
+            )
+        txt = latest_file.read_text(encoding="utf-8").strip()
+        candidate = Path(txt)
+        run_dir = candidate if candidate.is_absolute() else (base_dir / candidate)
+        if not run_dir.exists():
+            raise FileNotFoundError(f"Latest run folder does not exist: {run_dir}")
+    else:
+        candidate = Path(checkpoint_dir)
+        run_dir = candidate if candidate.is_absolute() else (base_dir / candidate)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        _write_latest(run_dir)
+
+    print(f"✓ Checkpoints for this run: {run_dir}")
+    return str(run_dir)
 
 
 
@@ -1895,5 +1957,4 @@ CHECKPOINT_DIR: str = ""
 
 
 if __name__ == '__main__':
-    CHECKPOINT_DIR = setup_checkpoint_directory()
     main()

@@ -1,0 +1,119 @@
+# [7/7] kan_gat_dp_three_stage_sigma2_00_20260108_112634
+# Model: D:\flight delay\stpn paper\STPN-main\kan_gat_dp_three_stage_sigma2_00_20260108_112634.pth
+
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'pyg-lib'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-scatter'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-cluster'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-spline-conv'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-sparse'. Disabling its usage. Stacktrace: [WinError 127] The specified procedure could not be found
+  import torch_geometric.typing
+Device: cuda
+
+Node-level balance: 24.20% delayed 
+✓ Loaded three-stage trained model (regressor trained on both delayed and non-delayed)
+
+Loaded three-stage DP model from: D:\flight delay\stpn paper\STPN-main\kan_gat_dp_three_stage_sigma2_00_20260108_112634.pth
+Final ε: 25.179
+Final δ: 1.00e-05
+Target ε: 15.000 | Status: EXCEEDED
+⚠️  Checkpoint reports epsilon budget exceeded during training.
+
+Output files will be:
+  Summary: three_stage_test_summary_eps25_18_20260108_135851.csv
+  Results Table: results_table_eps25_18_20260108_135851.csv
+  Predictions: three_stage_test_predictions_eps25_18_20260108_135851.csv
+
+[EVALUATION] Processing test samples...
+  Processed 1000/5474 samples...
+  Processed 2000/5474 samples...
+  Processed 3000/5474 samples...
+  Processed 4000/5474 samples...
+  Processed 5000/5474 samples...
+  Processed 5474/5474 samples...
+
+[DENORMALIZATION] Checking predictions...
+  Gated predictions shape: (273700, 2)
+  Gated predictions (scaled): min=0.000, max=0.000, mean=0.000
+  Test targets (scaled): min=-1.263, max=1.904, mean=-0.004
+  Applying inverse transform with scaler...
+    Scaler mean: 2.948054003341035, std: 14.205604184408468
+  After denormalization:
+    Predictions: min=2.95, max=2.95, mean=2.95
+    Targets: min=-15.00, max=30.00, mean=2.89
+
+[GROUND TRUTH] Delayed samples: 97640 | Non-delayed samples: 137069
+
+[VISUALIZATION] Generating evaluation plots...
+D:\flight delay\stpn paper\STPN-main\visualize_training_classification.py:355: UserWarning: This figure includes Axes that are not compatible with tight_layout, so results might be incorrect.
+  plt.tight_layout()
+Figure saved to eval_classification_results_eps25_18_20260108_135851.png
+D:\flight delay\stpn paper\STPN-main\visualize_training_classification.py:361: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+  plt.show()
+Figure saved to eval_regression_timeseries_eps25_18_20260108_135851.png
+D:\flight delay\stpn paper\STPN-main\visualize_training_classification.py:600: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+  plt.show()
+Figure saved to eval_regression_results_eps25_18_20260108_135851.png
+D:\flight delay\stpn paper\STPN-main\visualize_training_classification.py:505: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+  plt.show()
+  ✗ Error generating evaluation plots: cannot access local variable 'mean_absolute_error' where it is not associated with a value
+
+================================================================================
+TEST RESULTS - THREE-STAGE MODEL
+================================================================================
+
+CLASSIFICATION METRICS (macro over arrival/departure):
+  Precision: 0.0000 | Recall: 0.0000 | F1: 0.0000 | Accuracy: 0.7580
+  Per-channel:
+    Arrival   - P: 0.0000 R: 0.0000 F1: 0.0000 Acc: 0.7360
+    Departure - P: 0.0000 R: 0.0000 F1: 0.0000 Acc: 0.7800
+
+================================================================================
+PER-HORIZON RESULTS FOR DELAYED FLIGHTS (>5 min)
+================================================================================
+
+12-STEP AHEAD PREDICTIONS (Delayed Flights):
+  Samples: 97640
+  Arrival Delay:
+    MAE: 10.8369 min | RMSE: 14.0325 min | R²: -0.9763
+    Mean Predicted: 2.95 min | Mean Target: 12.81 min
+  Departure Delay:
+    MAE: 9.1354 min | RMSE: 12.8582 min | R²: -0.6735
+    Mean Predicted: 2.95 min | Mean Target: 11.11 min
+
+================================================================================
+PER-HORIZON RESULTS FOR NON-DELAYED FLIGHTS (<5 min)
+================================================================================
+NOTE: Stage 3 trains the regressor on non-delayed flights to produce accurate small delays
+
+12-STEP AHEAD PREDICTIONS (Non-Delayed Flights):
+  Samples: 137069
+  Arrival Delay:
+    MAE: 0.5973 min | RMSE: 1.2739 min | R²: -0.2071
+    Mean Predicted: 2.95 min | Mean Target: 2.42 min
+  Departure Delay:
+    MAE: 0.6048 min | RMSE: 1.2926 min | R²: -0.2182
+    Mean Predicted: 2.95 min | Mean Target: 2.40 min
+
+================================================================================
+PER-HORIZON RESULTS FOR ALL FLIGHTS (OVERALL)
+================================================================================
+
+12-STEP AHEAD PREDICTIONS (All Flights):
+  Samples: 273700
+  Arrival Delay:
+    MAE: 4.5826 min | RMSE: 8.5020 min | R²: -0.1253
+    Mean Predicted: 2.95 min | Mean Target: 5.78 min
+  Departure Delay:
+    MAE: 3.9795 min | RMSE: 7.8131 min | R²: -0.0877
+    Mean Predicted: 2.95 min | Mean Target: 5.17 min
+
+✓ Summary saved to: three_stage_test_summary_eps25_18_20260108_135851.csv
+
+✓ Comprehensive results table saved to: results_table_eps25_18_20260108_135851.csv
+✓ Predictions saved to: three_stage_test_predictions_eps25_18_20260108_135851.csv
+
+# OK

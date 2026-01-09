@@ -1851,6 +1851,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--data_source', type=str, default='cdata', choices=['cdata', 'udata'])
     parser.add_argument('--seq_len', type=int, default=8)
     parser.add_argument(
+        '--stage2_extra_kan',
+        action='store_true',
+        default=True,
+        help='Enable one extra hidden KAN layer in the regressor (affects Stage 2/3 regressors).',
+    )
+    parser.add_argument(
         '--horizons',
         type=int,
         nargs=1,
@@ -2048,7 +2054,13 @@ def main() -> None:
         in_channels=in_channels,
         out_channels=out_channels,
         hidden_channels=128,  # Increased from 16 for better capacity
+        regressor_extra_layer=args.stage2_extra_kan,
     ).to(device)
+
+    if args.stage2_extra_kan:
+        print("[MODEL] Stage 2 regressor extra KAN layer: ENABLED")
+    else:
+        print("[MODEL] Stage 2 regressor extra KAN layer: disabled")
     
     total_samples = len(train_x)
     sample_rate = args.batch_size / total_samples

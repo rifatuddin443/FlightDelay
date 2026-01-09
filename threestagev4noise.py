@@ -337,8 +337,8 @@ class PerSampleGradientClipper:
             else:
                 _, node_reg = self.model(data)
                 # REMOVED AGGREGATION: Use node-level regression
-                mask = (batch_y[i] >= 0).float()
-                loss = loss_fn(node_reg * mask, batch_y[i] * mask)
+                # Let the caller's loss_fn decide masking/reduction.
+                loss = loss_fn(node_reg, batch_y[i])
             
             loss.backward()
             
@@ -681,6 +681,7 @@ def train_stage2_with_dp(
     lr: float,
     scaler,
     class_threshold: float,
+    delay_threshold: float,
     patience: int,
     dp_config: DPConfig,
     batch_size: int,
@@ -699,7 +700,36 @@ def train_stage2_with_dp(
         param.requires_grad = False
     
     optimizer = torch.optim.Adam(model.regressor.parameters(), lr=lr, weight_decay=1e-4)
-    reg_loss_fn = nn.MSELoss(reduction='mean')
+    huber_loss = nn.HuberLoss(reduction='none', delta=2.0)
+
+    # Compute delay threshold in *scaled* space to match train_y_reg/val_y_reg.
+    # StandardScaler: scaled = (x - mean) / std
+    if scaler is not None and hasattr(scaler, 'mean') and hasattr(scaler, 'std'):
+        mean_np = np.array(scaler.mean, dtype=np.float32)
+        std_np = np.array(scaler.std, dtype=np.float32)
+        std_np = np.where(std_np == 0, 1.0, std_np)
+        threshold_scaled_np = (np.full_like(mean_np, delay_threshold, dtype=np.float32) - mean_np) / std_np
+        delay_threshold_scaled = torch.tensor(threshold_scaled_np, device=device, dtype=torch.float32)
+    else:
+        delay_threshold_scaled = torch.tensor(delay_threshold, device=device, dtype=torch.float32)
+
+    def masked_huber_loss(preds: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """Masked Huber loss where mask is defined by *ground-truth* delays."""
+        thr = delay_threshold_scaled.to(targets.device)
+        if thr.dim() == 0:
+            thr = thr.unsqueeze(0)
+        # Broadcast threshold across nodes/samples
+        while thr.dim() < targets.dim():
+            thr = thr.unsqueeze(0)
+
+        mask = (targets > thr).float()
+        if mask.dim() == 1:
+            mask = mask.unsqueeze(-1)
+
+        per_elem = huber_loss(preds, targets)
+        num = (per_elem * mask).sum(dim=0)
+        den = mask.sum(dim=0).clamp_min(1.0)
+        return (num / den).mean()
     
     accountant = RDPAccountant(
         noise_multiplier=dp_config.noise_multiplier,
@@ -747,7 +777,7 @@ def train_stage2_with_dp(
             
             if dp_config.enabled:
                 per_sample_grads, grad_diagnostics = clipper.compute_per_sample_gradients(
-                    batch_x, batch_y_reg, edge_indices, reg_loss_fn, is_classification=False
+                    batch_x, batch_y_reg, edge_indices, masked_huber_loss, is_classification=False
                 )
                 noisy_grads = clipper.add_noise_to_gradients(
                     per_sample_grads,
@@ -774,21 +804,8 @@ def train_stage2_with_dp(
                         reg_targets.append(batch_y_reg[i])
                     reg_preds = torch.cat(reg_preds, dim=0)
                     reg_targets = torch.cat(reg_targets, dim=0)
-                    
-                    cls_mask = []
-                    for i in range(len(batch_y_cls)):
-                        # REMOVED AGGREGATION
-                        cls_mask.append(batch_y_cls[i])
-                    cls_mask = torch.cat(cls_mask, dim=0)
-                    mask = (cls_mask >= class_threshold).float()
-                    if mask.dim() == 1:
-                        mask = mask.unsqueeze(-1)
-                    
-                    # Per-channel masked MSE then macro-average across channels
-                    se = (reg_preds - reg_targets) ** 2
-                    num = (se * mask).sum(dim=0)
-                    den = mask.sum(dim=0).clamp_min(1.0)
-                    loss = (num / den).mean()
+
+                    loss = masked_huber_loss(reg_preds, reg_targets)
                 
                 accountant.step()
             else:
@@ -807,21 +824,8 @@ def train_stage2_with_dp(
                     reg_targets.append(batch_y_reg[i])
                 reg_preds = torch.cat(reg_preds, dim=0)
                 reg_targets = torch.cat(reg_targets, dim=0)
-                
-                cls_mask = []
-                for i in range(len(batch_y_cls)):
-                    # REMOVED AGGREGATION
-                    cls_mask.append(batch_y_cls[i])
-                cls_mask = torch.cat(cls_mask, dim=0)
-                mask = (cls_mask >= class_threshold).float()
-                if mask.dim() == 1:
-                    mask = mask.unsqueeze(-1)
-                
-                # Per-channel masked MSE then macro-average across channels
-                se = (reg_preds - reg_targets) ** 2
-                num = (se * mask).sum(dim=0)
-                den = mask.sum(dim=0).clamp_min(1.0)
-                loss = (num / den).mean()
+
+                loss = masked_huber_loss(reg_preds, reg_targets)
                 loss.backward()
             
             optimizer.step()
@@ -838,9 +842,11 @@ def train_stage2_with_dp(
                     edge_index_od_t=edge_indices[2],
                 )
                 _, sample_reg = model(sample_data)
-                sample_mask = (train_y_cls[sample_idx] >= class_threshold)
+                # Stage 2 trains on ground-truth delayed targets.
+                thr_cpu = delay_threshold_scaled.detach().cpu()
+                sample_mask = (train_y_reg[sample_idx] > thr_cpu)
                 sample_targets = train_y_reg[sample_idx][sample_mask]
-                sample_preds = sample_reg[sample_mask]
+                sample_preds = sample_reg.detach().cpu()[sample_mask]
                 print(f"  [STAGE 2 Diagnostics - Epoch {epoch}]")
                 if len(sample_targets) > 0:
                     print(f"    Sample predictions (delayed): min={sample_preds.min().item():.3f}, max={sample_preds.max().item():.3f}, mean={sample_preds.mean().item():.3f}")
@@ -864,16 +870,8 @@ def train_stage2_with_dp(
                 )
                 _, node_reg = model(data)
                 # REMOVED AGGREGATION
-                
-                mask = (val_y_cls[i] >= class_threshold).float()
-                if mask.dim() == 1:
-                    mask = mask.unsqueeze(-1)
-                
-                # Per-channel masked MSE then macro-average across channels
-                se = (node_reg.cpu() - val_y_reg[i]) ** 2
-                num = (se * mask).sum(dim=0)
-                den = mask.sum(dim=0).clamp_min(1.0)
-                loss = (num / den).mean()
+
+                loss = masked_huber_loss(node_reg, val_y_reg[i].to(device))
                 val_losses.append(loss.item())
         
         val_loss = np.mean(val_losses)
@@ -1617,7 +1615,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--checkpoint_dir',
         type=str,
-        default='auto',
+        default='latest',
         help=(
             "Where to save/load stage checkpoints. "
             "Use 'auto' to create a new per-run subfolder under ./checkpoints, "
@@ -1784,7 +1782,8 @@ def main() -> None:
     model = SequentialTwoStagePredictor(
         in_channels=in_channels,
         out_channels=out_channels,
-        hidden_channels=64,  # Increased from 16 for better capacity
+        hidden_channels=128,  # Increased from 16 for better capacity
+        regressor_extra_layer=True,
     ).to(device)
     
     total_samples = len(train_x)
@@ -1839,11 +1838,34 @@ def main() -> None:
         edge_indices, device, args.stage1_epochs, args.lr,
         pos_weight, args.patience, dp_config, args.batch_size,
     )
+
+    # Stage 2 delayed-sample diagnostics (sample-level, not node-level)
+    cls_delayed_per_sample = (train_y_cls >= args.class_threshold)
+    while cls_delayed_per_sample.dim() > 1:
+        cls_delayed_per_sample = cls_delayed_per_sample.any(dim=-1)
+    delayed_samples_cls = int(cls_delayed_per_sample.sum().item())
+
+    if scaler is not None and hasattr(scaler, 'mean') and hasattr(scaler, 'std'):
+        mean_np = np.array(scaler.mean, dtype=np.float32)
+        std_np = np.array(scaler.std, dtype=np.float32)
+        std_np = np.where(std_np == 0, 1.0, std_np)
+        thr_scaled_np = (np.full_like(mean_np, args.delay_threshold, dtype=np.float32) - mean_np) / std_np
+        thr_scaled_t = torch.tensor(thr_scaled_np, dtype=train_y_reg.dtype)
+    else:
+        thr_scaled_t = torch.tensor(args.delay_threshold, dtype=train_y_reg.dtype)
+
+    reg_delayed_per_sample = (train_y_reg > thr_scaled_t)
+    while reg_delayed_per_sample.dim() > 1:
+        reg_delayed_per_sample = reg_delayed_per_sample.any(dim=-1)
+    delayed_samples_reg = int(reg_delayed_per_sample.sum().item())
+
+    print(f"\n[STAGE 2 DIAGNOSTIC] Delayed samples by cls threshold: {delayed_samples_cls}/{len(train_x)}")
+    print(f"[STAGE 2 DIAGNOSTIC] Delayed samples by reg threshold: {delayed_samples_reg}/{len(train_x)}")
     
     history_s2, accountant_s2, stage2_time = train_stage2_with_dp(
         model, train_x, train_y_reg, train_y_cls,
         val_x, val_y_reg, val_y_cls, edge_indices, device,
-        args.stage2_epochs, args.lr, scaler, args.class_threshold,
+        args.stage2_epochs, args.lr, scaler, args.class_threshold, args.delay_threshold,
         args.patience, dp_config, args.batch_size, accountant_s1,
     )
 

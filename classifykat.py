@@ -196,7 +196,13 @@ class ResidualKANPredictor(nn.Module):
 class SequentialTwoStagePredictor(nn.Module):
     """Classifier and regressor with independent training phases."""
 
-    def __init__(self, in_channels: int, out_channels: int, hidden_channels: int = 32):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        hidden_channels: int = 32,
+        regressor_extra_layer: bool = False,
+    ):
         super().__init__()
         self.encoder = LightweightGATEncoder(in_channels, hidden_channels=hidden_channels)
         embed_dim = hidden_channels
@@ -207,7 +213,11 @@ class SequentialTwoStagePredictor(nn.Module):
             spline_order=2,
         )
         self.regressor = KAN(
-            layers_hidden=[embed_dim, embed_dim // 2, out_channels],
+            layers_hidden=(
+                [embed_dim, embed_dim // 2, embed_dim // 2, out_channels]
+                if regressor_extra_layer
+                else [embed_dim, embed_dim // 2, out_channels]
+            ),
             grid_size=3,
             spline_order=2,
         )

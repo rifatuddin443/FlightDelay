@@ -711,7 +711,7 @@ def train_regression_with_dp(
     delayed_weight = float(delayed_weight)
 
     def reg_loss_fn(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        per_elem = F.smooth_l1_loss(pred, target, reduction="none")
+        per_elem = F.huber_loss(pred, target, reduction="none", delta=1.0)
         weights = 1.0 + (target >= thr_scaled).float() * max(0.0, delayed_weight - 1.0)
         return (per_elem * weights).mean()
 
@@ -720,11 +720,47 @@ def train_regression_with_dp(
         sample_rate=dp_config.sample_rate if dp_config.enabled else 1.0,
     )
 
+    # Diagnostics: delayed prevalence can look "huge" if you count a whole sample as
+    # delayed when ANY node/channel is delayed (with many nodes, that's very likely).
+    if scaler is not None:
+        train_y_denorm = scaler.inverse_transform(train_y_reg.cpu().numpy())
+        delayed_mask = train_y_denorm >= delay_threshold_minutes  # shape: [N, num_nodes, channels]
+
+        # Sample-level: at least one delayed element anywhere in the graph.
+        sample_any_delayed = delayed_mask.any(axis=(1, 2))
+        any_count = int(sample_any_delayed.sum())
+        any_pct = 100.0 * any_count / len(train_y_reg)
+
+        # Element-level: fraction of delayed elements (more interpretable for node-level labels).
+        per_sample_frac = delayed_mask.mean(axis=(1, 2))
+        frac_mean = float(per_sample_frac.mean())
+        frac_median = float(np.median(per_sample_frac))
+        ge_10pct = int((per_sample_frac >= 0.10).sum())
+        ge_50pct = int((per_sample_frac >= 0.50).sum())
+
+        total_delayed_elems = int(delayed_mask.sum())
+        total_elems = int(delayed_mask.size)
+        elem_pct = 100.0 * total_delayed_elems / max(1, total_elems)
+
+        print(f"\n[DELAYED SAMPLE DIAGNOSTICS]")
+        print(f"  ANY element >= {delay_threshold_minutes} min: {any_count}/{len(train_y_reg)} ({any_pct:.1f}%)")
+        print(f"  Delayed elements overall: {total_delayed_elems}/{total_elems} ({elem_pct:.1f}%)")
+        print(f"  Per-sample delayed fraction: mean={frac_mean:.3f}, median={frac_median:.3f}")
+        print(f"  Samples with >=10% delayed elements: {ge_10pct}/{len(train_y_reg)}")
+        print(f"  Samples with >=50% delayed elements: {ge_50pct}/{len(train_y_reg)}")
+
+        # Heuristic warning only makes sense for *meaningful* prevalence, not the ANY metric.
+        if ge_10pct < 1000:
+            print(
+                f"  ⚠️  Low delayed prevalence by >=10% rule ({ge_10pct} samples). "
+                f"Consider lowering delay_threshold or using element-level weighting."
+            )
+
     if dp_config.enabled:
         clipper = PerSampleGradientClipper(model, dp_config.max_grad_norm)
-        print(f"✓ DP-SGD enabled: σ={dp_config.noise_multiplier} | C={dp_config.max_grad_norm} | q={dp_config.sample_rate:.4f}")
+        print(f"\n✓ DP-SGD enabled: σ={dp_config.noise_multiplier} | C={dp_config.max_grad_norm} | q={dp_config.sample_rate:.4f}")
     else:
-        print("✗ DP-SGD disabled (standard training)")
+        print("\n✗ DP-SGD disabled (standard training)")
 
     history: List[Dict] = []
     best_val_loss = float("inf")
@@ -1983,7 +2019,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--no_dp', action='store_true', help='Disable DP-SGD (better accuracy baseline)')
     parser.add_argument('--target_epsilon', type=float, default=15.0, help='Target epsilon for tracking (not used for computing noise)')
     parser.add_argument('--target_delta', type=float, default=1e-5)
-    parser.add_argument('--noise_multiplier', type=float, default=2, help='Fixed noise multiplier for DP-SGD (lower=less noise, less privacy)')
+    parser.add_argument('--noise_multiplier', type=float, default=0.2, help='Fixed noise multiplier for DP-SGD (lower=less noise, less privacy)')
     parser.add_argument('--max_grad_norm', type=float, default=2.0, help='Max gradient norm for clipping (higher allows larger gradients)')
     parser.add_argument('--sample_rate', type=float, default=0.02)
     parser.add_argument('--epsilon_tolerance', type=float, default=0.05)

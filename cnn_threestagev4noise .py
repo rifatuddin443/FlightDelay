@@ -1,11 +1,11 @@
-"""Properly implemented differentially private sequential KAN-GAT pipeline with epsilon budget control.
+"""Three-stage CNN pipeline with optional DP-SGD and epsilon tracking.
 
-FIXED:
-1. Ensures both predictions AND targets are at graph-level (not node-level).
-2. Uses fixed noise multiplier for differential privacy (not auto-computed).
-3. Allows training to complete all epochs while tracking epsilon.
-4. NEW: Added Stage 3 for regressing delays on samples predicted as under threshold.
-5. FIXED: Stage 3 now correctly masks based on actual delay values (< 5 min), not classification labels.
+NOTES:
+- Mirrors the data loading + sequence building flow from `threestagev4noise.py`.
+- Uses a CNN encoder (Conv1d over time) with two heads:
+    - Stage 1: node-level delay classification (arrival/departure)
+    - Stage 2: delayed-flight regression
+    - Stage 3: non-delayed-flight regression
 """
 
 from __future__ import annotations
@@ -23,10 +23,8 @@ from typing import Dict, List, Tuple, Optional
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from torch import nn
 import torch.nn.functional as F
-from torch.func import grad, vmap, functional_call
 from torch.utils.data import Dataset
 from torch_geometric.data import Data
 import glob
@@ -295,6 +293,211 @@ def classification_metrics_per_channel(
     return metrics
 
 
+# --------------------------------------------------------------------------------------
+# Architecture override (this file only)
+# --------------------------------------------------------------------------------------
+
+
+class TemporalBlock(nn.Module):
+    """TCN-style residual block with dilated Conv1d."""
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        *,
+        kernel_size: int = 3,
+        dilation: int = 1,
+        dropout: float = 0.1,
+    ) -> None:
+        super().__init__()
+        padding = (kernel_size - 1) * dilation // 2
+
+        self.conv1 = nn.Conv1d(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            padding=padding,
+            dilation=dilation,
+        )
+        self.bn1 = nn.BatchNorm1d(out_channels)
+        self.act1 = nn.GELU()
+        self.drop1 = nn.Dropout(p=dropout)
+
+        self.conv2 = nn.Conv1d(
+            out_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            padding=padding,
+            dilation=dilation,
+        )
+        self.bn2 = nn.BatchNorm1d(out_channels)
+        self.act2 = nn.GELU()
+        self.drop2 = nn.Dropout(p=dropout)
+
+        self.downsample = (
+            nn.Conv1d(in_channels, out_channels, kernel_size=1)
+            if in_channels != out_channels
+            else None
+        )
+        self.out_act = nn.GELU()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out = self.drop1(self.act1(self.bn1(self.conv1(x))))
+        out = self.drop2(self.act2(self.bn2(self.conv2(out))))
+        res = x if self.downsample is None else self.downsample(x)
+        return self.out_act(out + res)
+
+
+class TemporalConvNet(nn.Module):
+    """Stack of `TemporalBlock`s with exponentially increasing dilation."""
+
+    def __init__(
+        self,
+        in_channels: int,
+        channels: List[int],
+        *,
+        kernel_size: int = 3,
+        dropout: float = 0.1,
+    ) -> None:
+        super().__init__()
+        layers: List[nn.Module] = []
+        prev = int(in_channels)
+        for i, ch in enumerate(channels):
+            dilation = 2**i
+            layers.append(
+                TemporalBlock(
+                    prev,
+                    int(ch),
+                    kernel_size=kernel_size,
+                    dilation=dilation,
+                    dropout=dropout,
+                )
+            )
+            prev = int(ch)
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
+class SequentialTwoStagePredictor(nn.Module):
+    """CNN-based encoder + fully-connected heads.
+
+    This class intentionally shadows the imported `SequentialTwoStagePredictor` so the
+    architecture can be changed without editing other files.
+
+        Expected input: `data.x` shaped either
+            - [num_nodes, in_channels] where in_channels = seq_len * feature_dim, or
+            - [num_nodes, seq_len, feature_dim].
+
+    Outputs are node-level:
+      - classifier logits: [num_nodes, out_channels]
+      - regressor preds:   [num_nodes, out_channels]
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        hidden_channels: int = 128,
+        regressor_extra_layer: bool = False,
+        seq_len: Optional[int] = None,
+    ) -> None:
+        super().__init__()
+        self.in_channels = int(in_channels)
+        self.out_channels = int(out_channels)
+        self.hidden_channels = int(hidden_channels)
+
+        self.seq_len = int(seq_len) if seq_len is not None else None
+        self.feature_dim: Optional[int] = None
+        if self.seq_len is not None and self.seq_len > 0 and (self.in_channels % self.seq_len == 0):
+            self.feature_dim = self.in_channels // self.seq_len
+
+        c1 = max(16, self.hidden_channels // 2)
+        c2 = max(16, self.hidden_channels)
+
+        # Preferred encoder: TCN-style temporal Conv1d (dilations + residual blocks)
+        # If seq_len can't be inferred, fall back to a simple flattened Conv1d.
+        if self.feature_dim is not None:
+            tcn = TemporalConvNet(
+                self.feature_dim,
+                [c1, c2, self.hidden_channels],
+                kernel_size=3,
+                dropout=0.1,
+            )
+            self.encoder = nn.Sequential(
+                tcn,
+                nn.AdaptiveAvgPool1d(1),
+                nn.Flatten(start_dim=1),
+            )
+        else:
+            # Fallback: Conv1d over flattened history vector.
+            self.encoder = nn.Sequential(
+                nn.Conv1d(1, c1, kernel_size=7, padding=3),
+                nn.GELU(),
+                nn.Conv1d(c1, c2, kernel_size=5, padding=2),
+                nn.GELU(),
+                nn.Conv1d(c2, self.hidden_channels, kernel_size=3, padding=1),
+                nn.GELU(),
+                nn.AdaptiveAvgPool1d(1),
+                nn.Flatten(start_dim=1),
+            )
+
+        self.dropout_cls = nn.Dropout(p=0.1)
+        self.dropout_reg = nn.Dropout(p=0.1)
+
+        # Fully-connected classifier head (ends in FC).
+        self.classifier = nn.Sequential(
+            nn.Linear(self.hidden_channels, self.hidden_channels),
+            nn.ReLU(),
+            nn.Linear(self.hidden_channels, self.out_channels),
+        )
+
+        # Fully-connected regressor head (ends in FC).
+        if regressor_extra_layer:
+            self.regressor = nn.Sequential(
+                nn.Linear(self.hidden_channels, self.hidden_channels),
+                nn.ReLU(),
+                nn.Linear(self.hidden_channels, self.out_channels),
+            )
+        else:
+            self.regressor = nn.Linear(self.hidden_channels, self.out_channels)
+
+    def _encode_x(self, x: torch.Tensor) -> torch.Tensor:
+        # Preferred path: [N, seq_len, feature_dim] -> [N, feature_dim, seq_len]
+        if self.feature_dim is not None:
+            if x.dim() == 3:
+                x_t = x.permute(0, 2, 1).contiguous()
+                return self.encoder(x_t)
+            if x.dim() == 2 and self.seq_len is not None:
+                x3 = x.view(x.shape[0], self.seq_len, self.feature_dim)
+                x_t = x3.permute(0, 2, 1).contiguous()
+                return self.encoder(x_t)
+
+        # Fallback path: flatten and run 1-channel Conv1d
+        if x.dim() == 3:
+            x_flat = x.reshape(x.shape[0], -1)
+        elif x.dim() == 2:
+            x_flat = x
+        else:
+            x_flat = x.view(x.shape[0], -1)
+        return self.encoder(x_flat.unsqueeze(1))
+
+    def forward_classifier(self, data: Data) -> Tuple[torch.Tensor, torch.Tensor]:
+        hidden = self._encode_x(data.x)
+        logits = self.classifier(self.dropout_cls(hidden))
+        return hidden, logits
+
+    def forward_regressor(self, hidden: torch.Tensor) -> torch.Tensor:
+        return self.regressor(self.dropout_reg(hidden))
+
+    def forward(self, data: Data) -> Tuple[torch.Tensor, torch.Tensor]:
+        hidden = self._encode_x(data.x)
+        node_reg = self.forward_regressor(hidden)
+        return hidden, node_reg
+
+
 class PerSampleGradientClipper:
     """Per-sample gradient clipping - simplified approach without functorch."""
     def __init__(self, model: nn.Module, max_grad_norm: float):
@@ -506,10 +709,9 @@ def train_stage1_with_dp(
                     dp_config.noise_multiplier,
                     len(batch_indices),
                 )
-                # Track gradient norms for diagnostics
-                # for name, param in model.named_parameters():
-                #     if param.requires_grad and name in noisy_grads:
-                #         param.grad = noisy_grads[name]
+                for name, param in model.named_parameters():
+                    if param.requires_grad and name in noisy_grads:
+                        param.grad = noisy_grads[name]
                 
                 # Log gradient statistics every 10 batches
                 # if start_idx % (batch_size * 10) == 0 and epoch % 5 == 0:
@@ -924,271 +1126,6 @@ def train_stage2_with_dp(
     print(f"\nStage 2 completed in {stage_time:.2f}s ({stage_time/60:.2f} min)")
     print(f"Final ε: {final_epsilon:.3f} (target: {dp_config.target_epsilon})")
     
-    return history, accountant, stage_time
-
-
-def train_stage2_with_dp_improved(
-    model: SequentialTwoStagePredictor,
-    train_x: torch.Tensor,
-    train_y_reg: torch.Tensor,
-    train_y_cls: torch.Tensor,
-    val_x: torch.Tensor,
-    val_y_reg: torch.Tensor,
-    val_y_cls: torch.Tensor,
-    edge_indices: Tuple,
-    device: torch.device,
-    epochs: int,
-    lr: float,
-    scaler,
-    class_threshold: float,
-    delay_threshold: float,
-    patience: int,
-    dp_config: DPConfig,
-    batch_size: int,
-    stage1_accountant: RDPAccountant,
-) -> Tuple[List[Dict], RDPAccountant, float]:
-    """IMPROVED Stage 2 with better delayed sample handling."""
-
-    stage_start_time = time.time()
-    print("\n" + "=" * 80)
-    print("STAGE 2: IMPROVED DELAYED FLIGHTS REGRESSOR")
-    print("=" * 80)
-
-    # Freeze encoder/classifier
-    for param in model.encoder.parameters():
-        param.requires_grad = False
-    for param in model.classifier.parameters():
-        param.requires_grad = False
-
-    # Lower LR with cosine annealing
-    optimizer = torch.optim.AdamW(
-        model.regressor.parameters(),
-        lr=lr * 0.5,  # Half LR for stability
-        weight_decay=1e-4,
-    )
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=max(1, epochs), eta_min=lr * 0.05
-    )
-
-    # Compute threshold in scaled space
-    if scaler is not None and hasattr(scaler, 'mean') and hasattr(scaler, 'std'):
-        mean_np = np.array(scaler.mean, dtype=np.float32)
-        std_np = np.array(scaler.std, dtype=np.float32)
-        std_np = np.where(std_np == 0, 1.0, std_np)
-        thr_scaled_np = (np.full_like(mean_np, delay_threshold, dtype=np.float32) - mean_np) / std_np
-        delay_threshold_scaled = torch.tensor(thr_scaled_np, device=device, dtype=torch.float32)
-    else:
-        delay_threshold_scaled = torch.tensor(delay_threshold, device=device, dtype=torch.float32)
-
-    # PRE-TRAINING DIAGNOSTIC
-    with torch.no_grad():
-        delayed_mask_all = (train_y_reg > delay_threshold_scaled.detach().cpu())
-        total_delayed = delayed_mask_all.sum().item()
-        total_elements = train_y_reg.numel()
-
-        print(f"\n[PRE-TRAINING DIAGNOSTIC]")
-        print(f"  Total training elements: {total_elements:,}")
-        print(f"  Delayed elements: {total_delayed:,} ({100*total_delayed/total_elements:.2f}%)")
-        print(f"  Delay threshold (original): {delay_threshold:.2f} min")
-        print(f"  Delay threshold (scaled): {delay_threshold_scaled.detach().cpu().numpy()}")
-
-        if total_delayed < 5000:
-            print(f"  ⚠️  WARNING: Very few delayed samples!")
-            print(f"  Consider lowering --delay_threshold or increasing training data")
-
-    # Custom weighted loss
-    def weighted_mse_loss(preds: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        """MSE with extra weight on delayed samples."""
-        thr = delay_threshold_scaled.to(targets.device)
-        if thr.dim() == 0:
-            thr = thr.unsqueeze(0)
-        while thr.dim() < targets.dim():
-            thr = thr.unsqueeze(0)
-
-        delayed_mask = (targets > thr).float()
-
-        # Compute squared error
-        se = (preds - targets) ** 2
-
-        # Weight delayed samples 3x more
-        weights = 3.0 * delayed_mask + 1.0 * (1 - delayed_mask)
-        weighted_se = se * weights
-
-        # Per-channel mean
-        loss_per_ch = weighted_se.mean(dim=0)
-        return loss_per_ch.mean()
-
-    accountant = RDPAccountant(
-        noise_multiplier=dp_config.noise_multiplier,
-        sample_rate=dp_config.sample_rate if dp_config.enabled else 1.0,
-        steps=stage1_accountant.steps,
-    )
-
-    clipper = None
-    if dp_config.enabled:
-        clipper = PerSampleGradientClipper(model, dp_config.max_grad_norm)
-        current_eps = stage1_accountant.get_epsilon(dp_config.target_delta)
-        print(f"✓ DP-SGD enabled (continuing from stage 1)")
-        print(f"  Current ε: {current_eps:.3f} / {dp_config.target_epsilon}")
-
-    history: List[Dict] = []
-    best_val_loss = float('inf')
-    best_state = None
-    early_stopping = EarlyStopping(patience=patience, mode="min")
-
-    # Training loop
-    for epoch in range(epochs + 1):
-        epoch_start_time = time.time()
-        model.train()
-        epoch_losses = []
-        epoch_delayed_count = 0
-        epoch_total_count = 0
-
-        num_samples = train_x.shape[0]
-        indices = torch.randperm(num_samples)
-
-        for start_idx in range(0, num_samples, batch_size):
-            end_idx = min(start_idx + batch_size, num_samples)
-            batch_indices = indices[start_idx:end_idx]
-            batch_x = train_x[batch_indices].to(device)
-            batch_y_reg = train_y_reg[batch_indices].to(device)
-
-            optimizer.zero_grad(set_to_none=True)
-
-            if dp_config.enabled and clipper is not None:
-                per_sample_grads, _grad_diag = clipper.compute_per_sample_gradients(
-                    batch_x, batch_y_reg, edge_indices, weighted_mse_loss, is_classification=False
-                )
-                noisy_grads = clipper.add_noise_to_gradients(
-                    per_sample_grads,
-                    dp_config.noise_multiplier,
-                    len(batch_indices),
-                )
-                for name, param in model.named_parameters():
-                    if param.requires_grad and name in noisy_grads:
-                        param.grad = noisy_grads[name]
-            else:
-                # Collect predictions
-                reg_preds = []
-                reg_targets = []
-                for i in range(len(batch_x)):
-                    data = Data(
-                        x=batch_x[i],
-                        edge_index_adj=edge_indices[0],
-                        edge_index_od=edge_indices[1],
-                        edge_index_od_t=edge_indices[2],
-                    )
-                    _, node_reg = model(data.to(device))
-                    reg_preds.append(node_reg)
-                    reg_targets.append(batch_y_reg[i])
-
-                reg_preds_t = torch.cat(reg_preds, dim=0)
-                reg_targets_t = torch.cat(reg_targets, dim=0)
-
-                # Count delayed samples this batch
-                delayed_mask_batch = (reg_targets_t > delay_threshold_scaled)
-                epoch_delayed_count += delayed_mask_batch.sum().item()
-                epoch_total_count += reg_targets_t.numel()
-
-                # Compute loss
-                loss = weighted_mse_loss(reg_preds_t, reg_targets_t)
-                loss.backward()
-
-                # Gradient clipping (even without DP, helps stability)
-                torch.nn.utils.clip_grad_norm_(
-                    model.regressor.parameters(),
-                    max_norm=dp_config.max_grad_norm,
-                )
-
-            # DP path needs logging loss + delayed count
-            if dp_config.enabled and clipper is not None:
-                with torch.no_grad():
-                    reg_preds = []
-                    reg_targets = []
-                    for i in range(len(batch_x)):
-                        data = Data(
-                            x=batch_x[i],
-                            edge_index_adj=edge_indices[0],
-                            edge_index_od=edge_indices[1],
-                            edge_index_od_t=edge_indices[2],
-                        )
-                        _, node_reg = model(data.to(device))
-                        reg_preds.append(node_reg)
-                        reg_targets.append(batch_y_reg[i])
-
-                    reg_preds_t = torch.cat(reg_preds, dim=0)
-                    reg_targets_t = torch.cat(reg_targets, dim=0)
-
-                    delayed_mask_batch = (reg_targets_t > delay_threshold_scaled)
-                    epoch_delayed_count += delayed_mask_batch.sum().item()
-                    epoch_total_count += reg_targets_t.numel()
-
-                    loss = weighted_mse_loss(reg_preds_t, reg_targets_t)
-
-                accountant.step()
-
-            optimizer.step()
-            epoch_losses.append(loss.item())
-
-        scheduler.step()
-
-        # Validation
-        model.eval()
-        val_losses = []
-        with torch.no_grad():
-            for i in range(len(val_x)):
-                data = Data(
-                    x=val_x[i].to(device),
-                    edge_index_adj=edge_indices[0],
-                    edge_index_od=edge_indices[1],
-                    edge_index_od_t=edge_indices[2],
-                )
-                _, node_reg = model(data)
-                loss = weighted_mse_loss(node_reg, val_y_reg[i].to(device))
-                val_losses.append(loss.item())
-
-        val_loss = float(np.mean(val_losses)) if val_losses else 0.0
-        delayed_pct = 100 * epoch_delayed_count / epoch_total_count if epoch_total_count > 0 else 0.0
-
-        current_epsilon = accountant.get_epsilon(dp_config.target_delta) if dp_config.enabled else float('inf')
-        epoch_time = time.time() - epoch_start_time
-
-        history.append(
-            {
-                'epoch': epoch,
-                'stage': 2,
-                'train_loss': float(np.mean(epoch_losses)) if epoch_losses else 0.0,
-                'val_loss': val_loss,
-                'delayed_pct': float(delayed_pct),
-                'lr': float(scheduler.get_last_lr()[0]),
-                'epsilon': current_epsilon,
-                'delta': dp_config.target_delta if dp_config.enabled else 0.0,
-                'epoch_time_seconds': epoch_time,
-                'total_steps': accountant.steps,
-            }
-        )
-
-        print(
-            f"Epoch {epoch}/{epochs} | Train Loss: {history[-1]['train_loss']:.4f} | "
-            f"Val Loss: {val_loss:.4f} | Delayed: {delayed_pct:.1f}% | "
-            f"LR: {scheduler.get_last_lr()[0]:.6f}"
-        )
-
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            best_state = model.regressor.state_dict()
-            print("  ✓ New best")
-
-        if early_stopping(val_loss, epoch):
-            print(f"  Early stopping at epoch {epoch}")
-            break
-
-    if best_state:
-        model.regressor.load_state_dict(best_state)
-
-    stage_time = time.time() - stage_start_time
-    print(f"\nStage 2 completed in {stage_time:.2f}s")
-
     return history, accountant, stage_time
 
 
@@ -1740,8 +1677,8 @@ def final_evaluation(
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     sigma_str = f"sigma{dp_config.noise_multiplier:.2f}".replace(".", "_")
     
-    history_csv = f"kan_gat_dp_three_stage_history_{sigma_str}_{timestamp}.csv"
-    summary_csv = f"kan_gat_dp_three_stage_summary_{sigma_str}_{timestamp}.csv"
+    history_csv = f"cnn_dp_three_stage_history_{sigma_str}_{timestamp}.csv"
+    summary_csv = f"cnn_dp_three_stage_summary_{sigma_str}_{timestamp}.csv"
     
     # Export history
     if histories:
@@ -1847,15 +1784,9 @@ def load_checkpoint(model, optimizer, path):
     return checkpoint['epoch'], checkpoint['loss']
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Three-stage DP-SGD for KAN-GAT with epsilon budget control")
-    parser.add_argument('--data_source', type=str, default='cdata', choices=['cdata', 'udata'])
+    parser = argparse.ArgumentParser(description="Three-stage CNN (with optional DP-SGD) with epsilon tracking")
+    parser.add_argument('--data_source', type=str, default='udata', choices=['cdata', 'udata'])
     parser.add_argument('--seq_len', type=int, default=8)
-    parser.add_argument(
-        '--stage2_extra_kan',
-        action='store_true',
-        default=True,
-        help='Enable one extra hidden KAN layer in the regressor (affects Stage 2/3 regressors).',
-    )
     parser.add_argument(
         '--horizons',
         type=int,
@@ -1869,20 +1800,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--use_node_level', action='store_true', default=True, help='Use node-level labels')
     parser.add_argument('--weather_file', type=str, default='weather_cn.npy')
     parser.add_argument('--period_hours', type=int, default=24)
-    parser.add_argument('--stage1_epochs', type=int, default=3)
-    parser.add_argument('--stage2_epochs', type=int, default=5)
-    parser.add_argument('--stage3_epochs', type=int, default=4, help='Epochs for non-delayed regressor')
+    parser.add_argument('--stage1_epochs', type=int, default=10)
+    parser.add_argument('--stage2_epochs', type=int, default=8)
+    parser.add_argument('--stage3_epochs', type=int, default=12, help='Epochs for non-delayed regressor')
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--lr', type=float, default=0.005)
     parser.add_argument('--patience', type=int, default=5)
     parser.add_argument('--dp', default=True, action='store_true', help='Enable DP-SGD')
     parser.add_argument('--target_epsilon', type=float, default=15.0, help='Target epsilon for tracking (not used for computing noise)')
     parser.add_argument('--target_delta', type=float, default=1e-5)
-    parser.add_argument('--noise_multiplier', type=float, default=0.5, help='Fixed noise multiplier for DP-SGD (lower=less noise, less privacy)')
+    parser.add_argument('--noise_multiplier', type=float, default=1, help='Fixed noise multiplier for DP-SGD (lower=less noise, less privacy)')
     parser.add_argument('--max_grad_norm', type=float, default=2.0, help='Max gradient norm for clipping (higher allows larger gradients)')
     parser.add_argument('--sample_rate', type=float, default=0.02)
     parser.add_argument('--epsilon_tolerance', type=float, default=0.05)
-    parser.add_argument('--model_path', type=str, default='kan_gat_dp_three_stage.pth')
+    parser.add_argument('--model_path', type=str, default='cnn_dp_three_stage.pth')
     parser.add_argument(
         '--checkpoint_dir',
         type=str,
@@ -2054,13 +1985,9 @@ def main() -> None:
         in_channels=in_channels,
         out_channels=out_channels,
         hidden_channels=128,  # Increased from 16 for better capacity
-        regressor_extra_layer=args.stage2_extra_kan,
+        regressor_extra_layer=True,
+        seq_len=args.seq_len,
     ).to(device)
-
-    if args.stage2_extra_kan:
-        print("[MODEL] Stage 2 regressor extra KAN layer: ENABLED")
-    else:
-        print("[MODEL] Stage 2 regressor extra KAN layer: disabled")
     
     total_samples = len(train_x)
     sample_rate = args.batch_size / total_samples
@@ -2138,7 +2065,7 @@ def main() -> None:
     print(f"\n[STAGE 2 DIAGNOSTIC] Delayed samples by cls threshold: {delayed_samples_cls}/{len(train_x)}")
     print(f"[STAGE 2 DIAGNOSTIC] Delayed samples by reg threshold: {delayed_samples_reg}/{len(train_x)}")
     
-    history_s2, accountant_s2, stage2_time = train_stage2_with_dp_improved(
+    history_s2, accountant_s2, stage2_time = train_stage2_with_dp(
         model, train_x, train_y_reg, train_y_cls,
         val_x, val_y_reg, val_y_cls, edge_indices, device,
         args.stage2_epochs, args.lr, scaler, args.class_threshold, args.delay_threshold,
@@ -2177,8 +2104,8 @@ def main() -> None:
     sigma_str = f"sigma{dp_config.noise_multiplier:.2f}".replace(".", "_")
     
     # Update model path if using default
-    if args.model_path == 'kan_gat_dp_three_stage.pth':
-        args.model_path = f"kan_gat_dp_three_stage_{sigma_str}_{timestamp}.pth"
+    if args.model_path == 'cnn_dp_three_stage.pth':
+        args.model_path = f"cnn_dp_three_stage_{sigma_str}_{timestamp}.pth"
     
     print(f"\nOutput model will be saved to: {args.model_path}")
     

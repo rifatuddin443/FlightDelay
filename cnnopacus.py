@@ -448,6 +448,29 @@ def _unwrap_opacus_model(model: nn.Module) -> nn.Module:
     return getattr(model, "_module", model)
 
 
+def _safe_get_epsilon(privacy_engine: Optional[object], target_delta: float) -> float:
+    """Get current epsilon from Opacus without crashing on OOM.
+
+    Opacus' default PRV accountant can be memory-intensive for large step counts.
+    If epsilon computation fails (e.g., MemoryError), return NaN and keep training.
+    """
+    if privacy_engine is None:
+        return float("inf")
+    try:
+        # PrivacyEngine.get_epsilon(delta)
+        return float(privacy_engine.get_epsilon(float(target_delta)))
+    except MemoryError:
+        print(
+            "[DP WARNING] MemoryError while computing epsilon. "
+            "Consider using --dp_accountant rdp (default) or lowering epochs/steps. "
+            "Continuing with epsilon=NaN."
+        )
+        return float("nan")
+    except Exception as e:
+        print(f"[DP WARNING] Failed to compute epsilon ({type(e).__name__}: {e}). Continuing with epsilon=NaN.")
+        return float("nan")
+
+
 def aggregate_node_to_graph(node_features: torch.Tensor) -> torch.Tensor:
     """Aggregate node-level features to graph-level via mean pooling."""
     return node_features.mean(dim=0, keepdim=True)
@@ -543,11 +566,7 @@ def train_stage1_opacus(
         )
 
         epoch_time = time.time() - epoch_start_time
-        current_epsilon = (
-            float(privacy_engine.get_epsilon(target_delta))
-            if privacy_engine is not None
-            else float("inf")
-        )
+        current_epsilon = _safe_get_epsilon(privacy_engine, target_delta)
 
         history.append(
             {
@@ -694,11 +713,7 @@ def train_stage2_opacus(
 
         val_loss = float(np.mean(val_losses)) if val_losses else 0.0
         epoch_time = time.time() - epoch_start_time
-        current_epsilon = (
-            float(privacy_engine.get_epsilon(target_delta))
-            if privacy_engine is not None
-            else float("inf")
-        )
+        current_epsilon = _safe_get_epsilon(privacy_engine, target_delta)
 
         masked_ratio = (total_masked / total_elements) if total_elements > 0 else 0.0
         val_masked_ratio = (val_masked / val_elements) if val_elements > 0 else 0.0
@@ -742,11 +757,7 @@ def train_stage2_opacus(
         p.requires_grad = True
 
     stage_time = time.time() - stage_start_time
-    final_epsilon = (
-        float(privacy_engine.get_epsilon(target_delta))
-        if privacy_engine is not None
-        else float("inf")
-    )
+    final_epsilon = _safe_get_epsilon(privacy_engine, target_delta)
     print(f"\nStage 2 completed in {stage_time:.2f}s ({stage_time/60:.2f} min)")
     if privacy_engine is not None:
         print(f"Final ε: {final_epsilon:.3f} (target: {target_epsilon})")
@@ -875,11 +886,7 @@ def train_stage3_opacus(
         val_nondelayed_ratio = (val_nondelayed / val_elements) if val_elements > 0 else 0.0
 
         epoch_time = time.time() - epoch_start_time
-        current_epsilon = (
-            float(privacy_engine.get_epsilon(target_delta))
-            if privacy_engine is not None
-            else float("inf")
-        )
+        current_epsilon = _safe_get_epsilon(privacy_engine, target_delta)
 
         history.append(
             {
@@ -923,11 +930,7 @@ def train_stage3_opacus(
         p.requires_grad = True
 
     stage_time = time.time() - stage_start_time
-    final_epsilon = (
-        float(privacy_engine.get_epsilon(target_delta))
-        if privacy_engine is not None
-        else float("inf")
-    )
+    final_epsilon = _safe_get_epsilon(privacy_engine, target_delta)
     print(f"\nStage 3 completed in {stage_time:.2f}s ({stage_time/60:.2f} min)")
     if privacy_engine is not None:
         print(f"Final ε: {final_epsilon:.3f} (target: {target_epsilon})")
@@ -1576,9 +1579,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--lr', type=float, default=0.005)
     parser.add_argument('--patience', type=int, default=5)
     parser.add_argument('--dp', default=True, action='store_true', help='Enable DP-SGD')
+    parser.add_argument(
+        '--dp_accountant',
+        type=str,
+        default='rdp',
+        choices=['rdp', 'prv', 'gdp'],
+        help=(
+            "Opacus privacy accountant. 'prv' can be memory-heavy and may crash on large runs; "
+            "'rdp' is usually much lighter."
+        ),
+    )
     parser.add_argument('--target_epsilon', type=float, default=15.0, help='Target epsilon for tracking (not used for computing noise)')
     parser.add_argument('--target_delta', type=float, default=1e-5)
-    parser.add_argument('--noise_multiplier', type=float, default=2, help='Fixed noise multiplier for DP-SGD (lower=less noise, less privacy)')
+    parser.add_argument('--noise_multiplier', type=float, default=0.2, help='Fixed noise multiplier for DP-SGD (lower=less noise, less privacy)')
     parser.add_argument('--max_grad_norm', type=float, default=2.0, help='Max gradient norm for clipping (higher allows larger gradients)')
     parser.add_argument('--sample_rate', type=float, default=0.02)
     parser.add_argument('--epsilon_tolerance', type=float, default=0.05)
@@ -1586,7 +1599,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--checkpoint_dir',
         type=str,
-        default='auto',
+        default="D:\\flight delay\\stpn paper\\STPN-main\\checkpoints\\run_20260111_130356_pid15124_215ab8",
         help=(
             "Where to save/load stage checkpoints. "
             "Use 'auto' to create a new per-run subfolder under ./checkpoints, "
@@ -1766,6 +1779,7 @@ def main() -> None:
     if args.dp:
         print(f"\nDIFFERENTIAL PRIVACY CONFIGURATION:")
         print(f"  Noise multiplier (σ): {args.noise_multiplier:.3f}")
+        print(f"  Accountant: {args.dp_accountant}")
         print(f"  Sampling: Without-replacement (all samples per epoch)")
         print(f"  Sample rate per step (q): {sample_rate:.4f} (batch_size={args.batch_size} / total={total_samples})")
         print(f"  Steps per epoch: {steps_per_epoch}")
@@ -1821,7 +1835,7 @@ def main() -> None:
             model = ModuleValidator.fix(model)
             ModuleValidator.validate(model, strict=True)
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
-        privacy_engine = PrivacyEngine()
+        privacy_engine = PrivacyEngine(accountant=str(args.dp_accountant))
         model, optimizer, train_loader = privacy_engine.make_private(
             module=model,
             optimizer=optimizer,
@@ -1913,7 +1927,7 @@ def main() -> None:
     combined_history = history_s1 + history_s2 + history_s3
 
     if args.dp and privacy_engine is not None:
-        final_epsilon = float(privacy_engine.get_epsilon(float(args.target_delta)))
+        final_epsilon = _safe_get_epsilon(privacy_engine, float(args.target_delta))
         final_delta = float(args.target_delta)
     else:
         final_epsilon = float("inf")

@@ -405,6 +405,14 @@ def train_regressor_opacus(
 
     _set_optimizer_hparams(optimizer, lr=lr, weight_decay=1e-4)
     loss_fn = nn.HuberLoss(reduction="mean", delta=2.0)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode="min",
+        factor=0.5,
+        patience=2,
+        min_lr=1e-6,
+    
+    )
 
     history: List[Dict] = []
     best_val = float("inf")
@@ -440,17 +448,20 @@ def train_regressor_opacus(
         val_loss = float(np.mean(val_losses)) if val_losses else 0.0
         train_loss = float(np.mean(train_losses)) if train_losses else 0.0
         epoch_time = time.time() - epoch_start_time
+        scheduler.step(val_loss)
         current_epsilon = (
             float(privacy_engine.get_epsilon(target_delta))
             if privacy_engine is not None
             else float("inf")
         )
+        current_lr = float(optimizer.param_groups[0].get("lr", lr))
 
         history.append(
             {
                 "epoch": epoch,
                 "train_loss": train_loss,
                 "val_loss": val_loss,
+                "lr": current_lr,
                 "epsilon": current_epsilon,
                 "delta": target_delta if privacy_engine is not None else 0.0,
                 "epoch_time_seconds": epoch_time,
@@ -462,6 +473,7 @@ def train_regressor_opacus(
         )
         print(
             f"Epoch {epoch}/{epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | "
+            f"LR: {current_lr:.2e} | "
             f"{eps_str} | Time: {epoch_time:.2f}s"
         )
 
@@ -986,14 +998,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--use_node_level', action='store_true', default=True, help='Use node-level labels')
     parser.add_argument('--weather_file', type=str, default='weather_cn.npy')
     parser.add_argument('--period_hours', type=int, default=24)
-    parser.add_argument('--epochs', type=int, default=20)
+    parser.add_argument('--epochs', type=int, default=12)
     parser.add_argument('--batch_size', type=int, default=128)
-    parser.add_argument('--lr', type=float, default=0.005)
+    # DP-SGD often needs a smaller LR; scheduler will reduce it further if needed.
+    parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--patience', type=int, default=5)
-    parser.add_argument('--dp', default=True, action='store_true', help='Enable DP-SGD')
+    dp_group = parser.add_mutually_exclusive_group()
+    dp_group.add_argument('--dp', dest='dp', default=True, action='store_true', help='Enable DP-SGD')
+    dp_group.add_argument('--no_dp', dest='dp', action='store_false', help='Disable DP-SGD')
+    parser.set_defaults(dp=True)
     parser.add_argument('--target_epsilon', type=float, default=15.0, help='Target epsilon for tracking (not used for computing noise)')
     parser.add_argument('--target_delta', type=float, default=1e-5)
-    parser.add_argument('--noise_multiplier', type=float, default=2, help='Fixed noise multiplier for DP-SGD (lower=less noise, less privacy)')
+    parser.add_argument('--noise_multiplier', type=float, default=1, help='Fixed noise multiplier for DP-SGD (lower=less noise, less privacy)')
     parser.add_argument('--max_grad_norm', type=float, default=2.0, help='Max gradient norm for clipping (higher allows larger gradients)')
     parser.add_argument('--sample_rate', type=float, default=0.02)
     parser.add_argument('--epsilon_tolerance', type=float, default=0.05)

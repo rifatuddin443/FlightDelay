@@ -1785,7 +1785,7 @@ def load_checkpoint(model, optimizer, path):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Three-stage CNN (with optional DP-SGD) with epsilon tracking")
-    parser.add_argument('--data_source', type=str, default='udata', choices=['cdata', 'udata'])
+    parser.add_argument('--data_source', type=str, default='cdata', choices=['cdata', 'udata'])
     parser.add_argument('--seq_len', type=int, default=8)
     parser.add_argument(
         '--horizons',

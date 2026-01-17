@@ -533,8 +533,10 @@ def train_stage1_opacus(
         epoch_start_time = time.time()
         model.train()
         epoch_losses: List[float] = []
+        step_count = 0
 
         for batch_x, batch_y_cls, _ in train_loader:
+            step_count += 1
             batch_x = batch_x.to(device)
             batch_y_cls = batch_y_cls.to(device)
             optimizer.zero_grad(set_to_none=True)
@@ -590,7 +592,7 @@ def train_stage1_opacus(
             f"Epoch {epoch}/{epochs} | Loss: {history[-1]['train_loss']:.4f} | "
             f"Val F1 (macro): {val_metrics['f1']:.4f} "
             f"[arr {val_metrics['f1_arrival']:.4f}, dep {val_metrics['f1_departure']:.4f}] | "
-            f"{eps_str} | Time: {epoch_time:.2f}s"
+            f"{eps_str} | Steps: {step_count} | Time: {epoch_time:.2f}s"
         )
 
         if float(val_metrics["f1"]) > best_f1:
@@ -1181,6 +1183,49 @@ def final_evaluation(
     
     print("\nREGRESSION (overall):")
     print(f"  MAE: {mae_overall:.4f} min | RMSE: {rmse_overall:.4f} min")
+
+    # Per-channel regression metrics (keep separate from flattened/merged metrics above)
+    arr_mae_d = arr_rmse_d = arr_n_d = 0.0
+    dep_mae_d = dep_rmse_d = dep_n_d = 0.0
+    arr_mae_nd = arr_rmse_nd = arr_n_nd = 0.0
+    dep_mae_nd = dep_rmse_nd = dep_n_nd = 0.0
+    arr_mae_all = arr_rmse_all = 0.0
+    dep_mae_all = dep_rmse_all = 0.0
+    
+    if targets_denorm.ndim == 2 and targets_denorm.shape[1] >= 2:
+        arr_targets = targets_denorm[:, 0].reshape(-1)
+        dep_targets = targets_denorm[:, 1].reshape(-1)
+        arr_preds = preds_denorm[:, 0].reshape(-1)
+        dep_preds = preds_denorm[:, 1].reshape(-1)
+
+        def _mae_rmse(y_true: np.ndarray, y_pred: np.ndarray, mask: np.ndarray) -> Tuple[float, float, int]:
+            if int(mask.sum()) == 0:
+                return 0.0, 0.0, 0
+            yt = y_true[mask]
+            yp = y_pred[mask]
+            mae = float(np.mean(np.abs(yp - yt)))
+            rmse = float(np.sqrt(np.mean((yp - yt) ** 2)))
+            return mae, rmse, int(mask.sum())
+
+        arr_delayed_mask = arr_targets > delay_threshold
+        dep_delayed_mask = dep_targets > delay_threshold
+        arr_nondelayed_mask = ~arr_delayed_mask
+        dep_nondelayed_mask = ~dep_delayed_mask
+
+        arr_mae_d, arr_rmse_d, arr_n_d = _mae_rmse(arr_targets, arr_preds, arr_delayed_mask)
+        dep_mae_d, dep_rmse_d, dep_n_d = _mae_rmse(dep_targets, dep_preds, dep_delayed_mask)
+        arr_mae_nd, arr_rmse_nd, arr_n_nd = _mae_rmse(arr_targets, arr_preds, arr_nondelayed_mask)
+        dep_mae_nd, dep_rmse_nd, dep_n_nd = _mae_rmse(dep_targets, dep_preds, dep_nondelayed_mask)
+        arr_mae_all, arr_rmse_all, _ = _mae_rmse(arr_targets, arr_preds, np.ones_like(arr_targets, dtype=bool))
+        dep_mae_all, dep_rmse_all, _ = _mae_rmse(dep_targets, dep_preds, np.ones_like(dep_targets, dtype=bool))
+
+        print("\nREGRESSION (per-channel, Arrival vs Departure):")
+        print(f"  Delayed   (> {delay_threshold} min): Arrival MAE {arr_mae_d:.4f} | RMSE {arr_rmse_d:.4f} (n={arr_n_d}), "
+              f"Departure MAE {dep_mae_d:.4f} | RMSE {dep_rmse_d:.4f} (n={dep_n_d})")
+        print(f"  Non-delay (<= {delay_threshold} min): Arrival MAE {arr_mae_nd:.4f} | RMSE {arr_rmse_nd:.4f} (n={arr_n_nd}), "
+              f"Departure MAE {dep_mae_nd:.4f} | RMSE {dep_rmse_nd:.4f} (n={dep_n_nd})")
+        print(f"  Overall: Arrival MAE {arr_mae_all:.4f} | RMSE {arr_rmse_all:.4f}, "
+              f"Departure MAE {dep_mae_all:.4f} | RMSE {dep_rmse_all:.4f}")
     
     # Visualize classification results
     if VISUALIZATION_AVAILABLE:
@@ -1265,16 +1310,51 @@ def final_evaluation(
         writer = csv.writer(f)
         writer.writerow(['metric', 'value'])
         summary = {
+            # Classification metrics (macro-averaged)
             'classification_precision': test_cls_metrics['precision'],
             'classification_recall': test_cls_metrics['recall'],
             'classification_f1': test_cls_metrics['f1'],
             'classification_accuracy': test_cls_metrics['accuracy'],
+            # Classification metrics (per-channel: arrival)
+            'classification_precision_arrival': test_cls_metrics['precision_arrival'],
+            'classification_recall_arrival': test_cls_metrics['recall_arrival'],
+            'classification_f1_arrival': test_cls_metrics['f1_arrival'],
+            'classification_accuracy_arrival': test_cls_metrics['accuracy_arrival'],
+            # Classification metrics (per-channel: departure)
+            'classification_precision_departure': test_cls_metrics['precision_departure'],
+            'classification_recall_departure': test_cls_metrics['recall_departure'],
+            'classification_f1_departure': test_cls_metrics['f1_departure'],
+            'classification_accuracy_departure': test_cls_metrics['accuracy_departure'],
+            # Regression metrics (overall/flattened)
             'regression_mae_delayed': mae_delayed,
             'regression_rmse_delayed': rmse_delayed,
             'regression_mae_nondelayed': mae_nondelayed,
             'regression_rmse_nondelayed': rmse_nondelayed,
             'regression_mae_overall': mae_overall,
             'regression_rmse_overall': rmse_overall,
+            # Regression metrics (per-channel: arrival - delayed)
+            'regression_mae_delayed_arrival': arr_mae_d,
+            'regression_rmse_delayed_arrival': arr_rmse_d,
+            'num_delayed_samples_arrival': int(arr_n_d),
+            # Regression metrics (per-channel: departure - delayed)
+            'regression_mae_delayed_departure': dep_mae_d,
+            'regression_rmse_delayed_departure': dep_rmse_d,
+            'num_delayed_samples_departure': int(dep_n_d),
+            # Regression metrics (per-channel: arrival - non-delayed)
+            'regression_mae_nondelayed_arrival': arr_mae_nd,
+            'regression_rmse_nondelayed_arrival': arr_rmse_nd,
+            'num_nondelayed_samples_arrival': int(arr_n_nd),
+            # Regression metrics (per-channel: departure - non-delayed)
+            'regression_mae_nondelayed_departure': dep_mae_nd,
+            'regression_rmse_nondelayed_departure': dep_rmse_nd,
+            'num_nondelayed_samples_departure': int(dep_n_nd),
+            # Regression metrics (per-channel: arrival - overall)
+            'regression_mae_overall_arrival': arr_mae_all,
+            'regression_rmse_overall_arrival': arr_rmse_all,
+            # Regression metrics (per-channel: departure - overall)
+            'regression_mae_overall_departure': dep_mae_all,
+            'regression_rmse_overall_departure': dep_rmse_all,
+            # Sample counts
             'num_delayed_samples': int(delayed_mask.sum()),
             'num_nondelayed_samples': int(nondelayed_mask.sum()),
             'target_epsilon': float(target_epsilon),
@@ -1589,9 +1669,15 @@ def parse_args() -> argparse.Namespace:
             "'rdp' is usually much lighter."
         ),
     )
-    parser.add_argument('--target_epsilon', type=float, default=15.0, help='Target epsilon for tracking (not used for computing noise)')
+    parser.add_argument(
+        '--epsilon',
+        type=float,
+        default=7.5,
+        help='Target epsilon (used for tracking; and with --epsilonfixed for noise calibration)'
+    )
+    # Backward-compatible alias (do not advertise)
     parser.add_argument('--target_delta', type=float, default=1e-5)
-    parser.add_argument('--noise_multiplier', type=float, default=0.2, help='Fixed noise multiplier for DP-SGD (lower=less noise, less privacy)')
+    parser.add_argument('--noise_multiplier', type=float, default=1, help='Fixed noise multiplier for DP-SGD (lower=less noise, less privacy)')
     parser.add_argument('--max_grad_norm', type=float, default=2.0, help='Max gradient norm for clipping (higher allows larger gradients)')
     parser.add_argument('--sample_rate', type=float, default=0.02)
     parser.add_argument('--epsilon_tolerance', type=float, default=0.05)
@@ -1599,7 +1685,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--checkpoint_dir',
         type=str,
-        default="D:\\flight delay\\stpn paper\\STPN-main\\checkpoints\\run_20260111_130356_pid15124_215ab8",
+        default="auto",
         help=(
             "Where to save/load stage checkpoints. "
             "Use 'auto' to create a new per-run subfolder under ./checkpoints, "
@@ -1609,6 +1695,16 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument('--seed', type=int, default=None, help='Random seed (None for random)')
     parser.add_argument('--balance_50_50', action='store_true', default=False, help='Apply random undersampling to achieve 50-50 class balance')
+    parser.add_argument(
+        '--epsilonfixed',
+        dest='epsilonfixed',
+        action='store_true',
+        default=True,
+        help='Enable epsilon-calibrated DP-SGD (uses Opacus make_private_with_epsilon) [DEFAULT]'
+    )
+    # Backward-compatible alias (do not advertise)
+    parser.add_argument('--make_private', dest='epsilonfixed', action='store_true', help=argparse.SUPPRESS)
+    parser.add_argument('--no-epsilonfixed', dest='epsilonfixed', action='store_false', help='Disable epsilon-calibrated mode (use fixed noise multiplier instead)')
     return parser.parse_args()
 
 
@@ -1771,32 +1867,7 @@ def main() -> None:
         seq_len=args.seq_len,
     ).to(device)
     
-    total_samples = len(train_x)
-    sample_rate = args.batch_size / total_samples
-    steps_per_epoch = int(np.ceil(total_samples / args.batch_size))
-    total_steps = (args.stage1_epochs + args.stage2_epochs + args.stage3_epochs) * steps_per_epoch
-    
-    if args.dp:
-        print(f"\nDIFFERENTIAL PRIVACY CONFIGURATION:")
-        print(f"  Noise multiplier (σ): {args.noise_multiplier:.3f}")
-        print(f"  Accountant: {args.dp_accountant}")
-        print(f"  Sampling: Without-replacement (all samples per epoch)")
-        print(f"  Sample rate per step (q): {sample_rate:.4f} (batch_size={args.batch_size} / total={total_samples})")
-        print(f"  Steps per epoch: {steps_per_epoch}")
-        print(f"  Expected total steps: {total_steps} ({steps_per_epoch} steps/epoch × {args.stage1_epochs + args.stage2_epochs + args.stage3_epochs} epochs)")
-        print(f"  Target epsilon: {args.target_epsilon:.3f}")
-        print(f"  Note: Privacy accounting is conservative (actual privacy may be better)")
-        
-        # Calculate expected noise scale for diagnostics
-        noise_scale = args.noise_multiplier * args.max_grad_norm / args.batch_size
-        print(f"\n[DP DIAGNOSTICS]")
-        print(f"  Noise scale: {noise_scale:.6f} (noise_multiplier × max_grad_norm / batch_size)")
-        print(f"  For good learning, gradient norms should be > {noise_scale * 3:.6f} (3x noise scale)")
-        print(f"  Max gradient norm (clip threshold): {args.max_grad_norm}")
-        
-        args.sample_rate = sample_rate
-    
-    # Build node-level datasets/loaders for Opacus.
+    # Build node-level datasets/loaders for Opacus FIRST (before calculating steps).
     train_x_flat = _flatten_node_level(train_x)
     train_y_cls_flat = _flatten_node_level(train_y_cls)
     train_y_reg_flat = _flatten_node_level(train_y_reg)
@@ -1807,6 +1878,47 @@ def main() -> None:
 
     train_ds = TensorDataset(train_x_flat, train_y_cls_flat, train_y_reg_flat)
     val_ds = TensorDataset(val_x_flat, val_y_cls_flat, val_y_reg_flat)
+
+    # Calculate steps based on ACTUAL flattened dataset size (node-level samples)
+    total_samples = len(train_ds)  # Node-level count, NOT graph-level
+    sample_rate = args.batch_size / total_samples
+    # Note: DPDataLoader ignores drop_last, so use floor division for accurate step count
+    steps_per_epoch = total_samples // args.batch_size
+    total_epochs = args.stage1_epochs + args.stage2_epochs + args.stage3_epochs
+    total_steps = total_epochs * steps_per_epoch
+    
+    if args.dp or args.epsilonfixed:
+        print(f"\nDIFFERENTIAL PRIVACY CONFIGURATION:")
+        if args.epsilonfixed:
+            print(f"  Mode: EPSILON-CALIBRATED (make_private_with_epsilon)")
+            print(f"  Target epsilon: {args.epsilon:.3f}")
+            print(f"  Noise multiplier will be auto-calibrated by Opacus")
+        else:
+            print(f"  Mode: FIXED-NOISE (make_private)")
+            print(f"  Noise multiplier (σ): {args.noise_multiplier:.3f}")
+            print(f"  Tracking target epsilon: {args.epsilon:.3f}")
+        print(f"  Accountant: {args.dp_accountant}")
+        print(f"  Sampling: Without-replacement (all samples per epoch)")
+        print(f"  Training samples (node-level): {total_samples}")
+        print(f"  Sample rate per step (q): {sample_rate:.6f} (batch_size={args.batch_size} / total={total_samples})")
+        print(f"  Steps per epoch: {steps_per_epoch}")
+        print(f"  Total epochs (all stages): {total_epochs}")
+        print(f"  Expected total steps: {total_steps} ({steps_per_epoch} steps/epoch × {total_epochs} epochs)")
+        print(f"  Note: Privacy accounting is conservative (actual privacy may be better)")
+        
+        # Calculate expected noise scale for diagnostics (only for fixed-noise mode)
+        if not args.epsilonfixed:
+            noise_scale = args.noise_multiplier * args.max_grad_norm / args.batch_size
+            print(f"\n[DP DIAGNOSTICS]")
+            print(f"  Noise scale: {noise_scale:.6f} (noise_multiplier × max_grad_norm / batch_size)")
+            print(f"  For good learning, gradient norms should be > {noise_scale * 3:.6f} (3x noise scale)")
+            print(f"  Max gradient norm (clip threshold): {args.max_grad_norm}")
+        else:
+            print(f"\n[DP DIAGNOSTICS]")
+            print(f"  Noise multiplier will be calibrated by Opacus after initialization...")
+            print(f"  Max gradient norm (clip threshold): {args.max_grad_norm}")
+        
+        args.sample_rate = sample_rate
 
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, drop_last=True)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, drop_last=False)
@@ -1825,7 +1937,10 @@ def main() -> None:
     print(f"Class balance (delayed): {cls_pos_rate.mean().item():.2%}")
 
     privacy_engine = None
-    if args.dp:
+    dp_enabled = bool(getattr(args, "dp", False) or getattr(args, "epsilonfixed", False))
+    tracking_target_epsilon = float(args.epsilon)
+    effective_noise_multiplier = float(args.noise_multiplier)
+    if dp_enabled:
         if not OPACUS_AVAILABLE:
             raise ImportError(
                 "Opacus is required for --dp but is not installed. "
@@ -1835,14 +1950,53 @@ def main() -> None:
             model = ModuleValidator.fix(model)
             ModuleValidator.validate(model, strict=True)
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
-        privacy_engine = PrivacyEngine(accountant=str(args.dp_accountant))
-        model, optimizer, train_loader = privacy_engine.make_private(
-            module=model,
-            optimizer=optimizer,
-            data_loader=train_loader,
-            noise_multiplier=float(args.noise_multiplier),
-            max_grad_norm=float(args.max_grad_norm),
-        )
+        accountant = str(args.dp_accountant)
+        if getattr(args, "epsilonfixed", False) and accountant != "rdp":
+            print("[DP WARNING] --epsilonfixed uses make_private_with_epsilon; forcing --dp_accountant rdp for noise calibration.")
+            accountant = "rdp"
+        privacy_engine = PrivacyEngine(accountant=accountant)
+
+        if getattr(args, "epsilonfixed", False):
+            if not hasattr(privacy_engine, "make_private_with_epsilon"):
+                raise RuntimeError(
+                    "Your installed Opacus does not support PrivacyEngine.make_private_with_epsilon. "
+                    "Upgrade Opacus (e.g., pip install -U opacus) or run without --epsilonfixed and use --noise_multiplier."
+                )
+            print(f"\n[EPSILON-CALIBRATED DP] Calling make_private_with_epsilon:")
+            print(f"  target_epsilon={args.epsilon}, target_delta={args.target_delta}, epochs={total_epochs}")
+            print(f"  max_grad_norm={args.max_grad_norm}")
+            print(f"  Training samples (node-level): {len(train_ds)}, batch_size: {args.batch_size}")
+            print(f"  Steps per epoch: {steps_per_epoch}")
+            print(f"  Total steps: {total_steps}")
+            model, optimizer, train_loader = privacy_engine.make_private_with_epsilon(
+                module=model,
+                optimizer=optimizer,
+                data_loader=train_loader,
+                target_epsilon=float(args.epsilon),
+                target_delta=float(args.target_delta),
+                epochs=total_epochs,
+                max_grad_norm=float(args.max_grad_norm),
+            )
+            # After make_private_with_epsilon, noise_multiplier is on the optimizer, not privacy_engine
+            try:
+                effective_noise_multiplier = float(optimizer.noise_multiplier)
+                noise_scale = effective_noise_multiplier * args.max_grad_norm / args.batch_size
+                print(f"\n  ✓ CALIBRATION RESULTS:")
+                print(f"    Noise multiplier (σ): {effective_noise_multiplier:.4f}")
+                print(f"    Noise scale: {noise_scale:.6f} (σ × max_grad_norm / batch_size)")
+                print(f"    For good learning, gradient norms should be > {noise_scale * 3:.6f} (3x noise scale)")
+                print(f"    This noise is calibrated for {total_epochs} epochs total (across all 3 stages)")
+            except AttributeError:
+                print(f"  ⚠️ Could not retrieve calibrated noise_multiplier (not on optimizer)")
+                effective_noise_multiplier = float(args.noise_multiplier)
+        else:
+            model, optimizer, train_loader = privacy_engine.make_private(
+                module=model,
+                optimizer=optimizer,
+                data_loader=train_loader,
+                noise_multiplier=float(args.noise_multiplier),
+                max_grad_norm=float(args.max_grad_norm),
+            )
     else:
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
 
@@ -1858,7 +2012,7 @@ def main() -> None:
         pos_weight=pos_weight,
         patience=args.patience,
         target_delta=float(args.target_delta),
-        target_epsilon=float(args.target_epsilon),
+        target_epsilon=tracking_target_epsilon,
     )
 
     # Stage 2 delayed-sample diagnostics (sample-level, not node-level)
@@ -1897,7 +2051,7 @@ def main() -> None:
         delay_threshold=float(args.delay_threshold),
         patience=args.patience,
         target_delta=float(args.target_delta),
-        target_epsilon=float(args.target_epsilon),
+        target_epsilon=tracking_target_epsilon,
     )
 
     # Preserve delayed regressor after Stage 2 (do not swap modules; keep optimizer valid).
@@ -1918,7 +2072,7 @@ def main() -> None:
         delay_threshold=float(args.delay_threshold),
         patience=args.patience,
         target_delta=float(args.target_delta),
-        target_epsilon=float(args.target_epsilon),
+        target_epsilon=tracking_target_epsilon,
     )
 
     base_model.regressor_nondelayed = copy.deepcopy(base_model.regressor).to(device)
@@ -1926,7 +2080,7 @@ def main() -> None:
 
     combined_history = history_s1 + history_s2 + history_s3
 
-    if args.dp and privacy_engine is not None:
+    if dp_enabled and privacy_engine is not None:
         final_epsilon = _safe_get_epsilon(privacy_engine, float(args.target_delta))
         final_delta = float(args.target_delta)
     else:
@@ -1934,12 +2088,12 @@ def main() -> None:
         final_delta = 0.0
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    sigma_val = float(args.noise_multiplier) if args.dp else 0.0
+    sigma_val = float(effective_noise_multiplier) if dp_enabled else 0.0
     run_tag = _run_tag(
         train_script=__file__,
         data_source=str(args.data_source),
-        noise_multiplier=float(args.noise_multiplier),
-        dp_enabled=bool(args.dp),
+        noise_multiplier=float(effective_noise_multiplier),
+        dp_enabled=dp_enabled,
     )
 
     # Always enforce reproducible naming (preserve directory if provided).
@@ -1981,7 +2135,7 @@ def main() -> None:
         len(train_x),
         len(val_x),
         bool(args.dp),
-        float(args.target_epsilon),
+        float(args.epsilon),
         sigma_val,
         artifact_prefix="train",
     )

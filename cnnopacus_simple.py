@@ -1009,7 +1009,7 @@ def parse_args() -> argparse.Namespace:
     parser.set_defaults(dp=True)
     parser.add_argument('--target_epsilon', type=float, default=15.0, help='Target epsilon for tracking (not used for computing noise)')
     parser.add_argument('--target_delta', type=float, default=1e-5)
-    parser.add_argument('--noise_multiplier', type=float, default=1, help='Fixed noise multiplier for DP-SGD (lower=less noise, less privacy)')
+    parser.add_argument('--noise_multiplier', type=float, default=0.5, help='Fixed noise multiplier for DP-SGD (lower=less noise, less privacy)')
     parser.add_argument('--max_grad_norm', type=float, default=2.0, help='Max gradient norm for clipping (higher allows larger gradients)')
     parser.add_argument('--sample_rate', type=float, default=0.02)
     parser.add_argument('--epsilon_tolerance', type=float, default=0.05)
@@ -1017,7 +1017,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--checkpoint_dir',
         type=str,
-        default='auto',
+        default="latest",
         help=(
             "Where to save/load stage checkpoints. "
             "Use 'auto' to create a new per-run subfolder under ./checkpoints, "
@@ -1243,7 +1243,7 @@ def main() -> None:
             model = ModuleValidator.fix(model)
             ModuleValidator.validate(model, strict=True)
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
-        privacy_engine = PrivacyEngine()
+        privacy_engine = PrivacyEngine(accountant="rdp")
         model, optimizer, train_loader = privacy_engine.make_private(
             module=model,
             optimizer=optimizer,

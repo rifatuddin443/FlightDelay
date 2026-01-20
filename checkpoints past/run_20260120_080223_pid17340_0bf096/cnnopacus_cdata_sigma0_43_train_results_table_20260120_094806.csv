@@ -1,0 +1,107 @@
+================================================================================
+COMPREHENSIVE EVALUATION RESULTS
+================================================================================
+
+MODEL INFORMATION
+Model Path,checkpoints\run_20260120_080223_pid17340_0bf096\cnnopacus_cdata_sigma0_43_model_20260120_094806.pth
+Run Tag,cnnopacus_cdata_sigma0_43
+Timestamp,20260120_094806
+Artifact Prefix,train
+Horizons,12
+Delay Threshold,5.0 min (Delayed if > threshold)
+Classification Threshold,0.5
+DP Enabled,True
+Noise Multiplier (sigma),0.4339599609375
+Final Epsilon,7.500
+Target Epsilon,7.500
+Final Delta,1.00e-05
+Epsilon Exceeded,False
+Train Samples,19207
+Val Samples,2727
+Test Samples,5474
+
+================================================================================
+CLASSIFICATION METRICS (Macro over Arrival/Departure)
+================================================================================
+Metric,Value
+Precision,0.4461
+Recall,0.6843
+F1 Score,0.5397
+Accuracy,0.7183
+
+Per-Channel Metrics:
+Channel,Precision,Recall,F1 Score,Accuracy
+Arrival,0.4481,0.6484,0.5300,0.6964
+Departure,0.4441,0.7202,0.5495,0.7401
+
+================================================================================
+OVERALL SUMMARY TABLE
+================================================================================
+Epsilon,Overall MAE (min),Arrival MAE (min),Departure MAE (min),Precision,Recall,F1 Score,Accuracy
+7.50,5.4232,5.8164,5.0301,0.4461,0.6843,0.5397,0.7183
+
+================================================================================
+DETAILED METRICS - DELAYED (>5.0 min)
+================================================================================
+Group,Samples,Arrival MAE,Arrival RMSE,Arrival R2,Departure MAE,Departure RMSE,Departure R2,Mean Arr Pred,Mean Arr Target,Mean Dep Pred,Mean Dep Target
+Delayed,132461,8.7214,11.2240,-0.8100,8.6533,11.1392,-0.7642,9.78,16.90,10.08,16.93
+
+================================================================================
+DETAILED METRICS - NON-DELAYED (<= 5.0 min)
+================================================================================
+Group,Samples,Arrival MAE,Arrival RMSE,Arrival R2,Departure MAE,Departure RMSE,Departure R2,Mean Arr Pred,Mean Arr Target,Mean Dep Pred,Mean Dep Target
+Non-delayed,414939,4.7746,6.2330,-17.2081,4.0082,5.8519,-15.4112,6.55,1.80,5.82,1.85
+
+================================================================================
+"SUMMARY (raw metric/value, matches summary CSV)"
+================================================================================
+metric,value
+classification_precision,0.44614144788959964
+classification_recall,0.6843380456746466
+classification_f1,0.539726228951133
+classification_accuracy,0.7182827913773943
+classification_precision_arrival,0.4481422667788658
+classification_recall_arrival,0.6484283084417833
+classification_f1_arrival,0.5299943950807599
+classification_accuracy_arrival,0.6964230909754952
+classification_precision_departure,0.44414062900033346
+classification_recall_departure,0.7202477829075099
+classification_f1_departure,0.5494580628215061
+classification_accuracy_departure,0.7401424917792934
+regression_mae_delayed,8.690424689829142
+regression_rmse_delayed,11.185567835772405
+regression_mae_nondelayed,4.380265153122185
+regression_rmse_nondelayed,6.039927194313879
+regression_mae_overall,5.423246597023795
+regression_rmse_overall,7.611116596189194
+regression_mae_delayed_arrival,8.721384927571043
+regression_rmse_delayed_arrival,11.224037496060813
+num_delayed_samples_arrival,72247
+regression_mae_delayed_departure,8.653277443405734
+regression_rmse_delayed_departure,11.139235172626437
+num_delayed_samples_departure,60214
+regression_mae_nondelayed_arrival,4.774596351386826
+regression_rmse_nondelayed_arrival,6.233018042569725
+num_nondelayed_samples_arrival,201453
+regression_mae_nondelayed_departure,4.008160177226778
+regression_rmse_nondelayed_departure,5.851879952236112
+num_nondelayed_samples_departure,213486
+regression_mae_overall_arrival,5.816407218261436
+regression_rmse_overall_arrival,7.864433814963245
+regression_mae_overall_departure,5.030085975786149
+regression_rmse_overall_departure,7.349072897422899
+num_delayed_samples,132461
+num_nondelayed_samples,414939
+target_epsilon,7.5
+final_epsilon,7.499784931809295
+epsilon_exceeded,False
+epsilon_overshoot,0.0
+final_delta,1e-05
+stage1_time_seconds,3886.3742203712463
+stage2_time_seconds,991.8960464000702
+stage3_time_seconds,1460.3876070976257
+total_training_time_seconds,6338.657873868942
+total_training_time_minutes,105.6442978978157
+train_samples,19207
+val_samples,2727
+test_samples,5474

@@ -464,6 +464,74 @@ class OpacusTensorOnlyWrapper(nn.Module):
         return self.model.dropout_reg
 
 
+class RegressorOnlyWrapper(nn.Module):
+    """Wrapper that only exposes regressor for Opacus, computing encoder in no_grad.
+    
+    This avoids Opacus hooks firing on frozen encoder layers which causes
+    'Per sample gradient is not initialized' errors.
+    """
+    
+    def __init__(
+        self,
+        full_model: nn.Module,
+        edge_index_adj: torch.Tensor,
+        edge_index_od: torch.Tensor,
+        edge_index_od_t: torch.Tensor,
+    ) -> None:
+        super().__init__()
+        # Only register regressor as a submodule - this is what Opacus will wrap
+        self.regressor = full_model.regressor
+        self.dropout_reg = full_model.dropout_reg
+        
+        # Keep references to frozen parts (not registered as submodules)
+        self._encoder = full_model.encoder
+        self._classifier = full_model.classifier
+        self._dropout_cls = full_model.dropout_cls
+        
+        # Store edge indices
+        self.register_buffer('_edge_index_adj', edge_index_adj.clone(), persistent=False)
+        self.register_buffer('_edge_index_od', edge_index_od.clone(), persistent=False)
+        self.register_buffer('_edge_index_od_t', edge_index_od_t.clone(), persistent=False)
+    
+    def _ensure_2d_x(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() == 3 and x.size(0) == 1:
+            return x.squeeze(0)
+        return x
+    
+    def _encode_no_grad(self, x: torch.Tensor) -> torch.Tensor:
+        """Compute encoder output without gradients (frozen encoder)."""
+        x = self._ensure_2d_x(x)
+        enc = self._encoder
+        
+        with torch.no_grad():
+            weights = F.softmax(torch.stack([enc.alpha_adj, enc.alpha_od, enc.alpha_od_t]), dim=0)
+            w_adj, w_od, w_od_t = weights[0], weights[1], weights[2]
+            
+            x_adj = enc.gat_adj(x, self._edge_index_adj)
+            x_od = enc.gat_od(x, self._edge_index_od)
+            x_od_t = enc.gat_od_t(x, self._edge_index_od_t)
+            
+            num_nodes = x_adj.size(0)
+            scalars = torch.cat([
+                w_adj.expand(num_nodes, 1),
+                w_od.expand(num_nodes, 1),
+                w_od_t.expand(num_nodes, 1),
+            ], dim=1)
+            
+            x_concat = torch.cat([x_adj, x_od, x_od_t, scalars], dim=1)
+            fused = F.relu(enc.fusion_kan(x_concat))
+            fused = enc.dropout(fused)
+        
+        # Return with requires_grad=True so regressor can compute gradients
+        return fused.detach().requires_grad_(True)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass: frozen encoder -> trainable regressor."""
+        hidden = self._encode_no_grad(x)
+        reg_out = self.regressor(self.dropout_reg(hidden))
+        return reg_out
+
+
 def _noop_update_grid(x: torch.Tensor, margin: float = 0.01) -> None:
     """No-op replacement for KANLinear.update_grid for Opacus compatibility."""
     pass
@@ -1523,6 +1591,9 @@ def train_stage3_with_dp(
         param.requires_grad = False
     for param in core_model.classifier.parameters():
         param.requires_grad = False
+    # Ensure regressor is trainable
+    for param in core_model.regressor.parameters():
+        param.requires_grad = True
 
     # Much lower LR, regressor only
     optimizer = torch.optim.Adam(
@@ -1547,12 +1618,14 @@ def train_stage3_with_dp(
         train_ds_dp = TensorDatasetForDP(train_x, y_reg=train_y_reg, y_cls=None)
         train_loader_dp_raw = DataLoader(train_ds_dp, batch_size=1, shuffle=True)
         
-        wrapped_model = OpacusTensorOnlyWrapper(
-            model,
+        # Use RegressorOnlyWrapper to avoid Opacus hooks on frozen encoder
+        # This computes encoder output with no_grad and only wraps regressor
+        wrapped_model = RegressorOnlyWrapper(
+            core_model,
             edge_index_adj=edge_indices[0].to(device),
             edge_index_od=edge_indices[1].to(device),
             edge_index_od_t=edge_indices[2].to(device),
-        )
+        ).to(device)
         
         # Create optimizer with all trainable parameters from wrapped model
         # (encoder and classifier are frozen, so only regressor params are trainable)
@@ -1623,6 +1696,7 @@ def train_stage3_with_dp(
 
         with loader_ctx as train_iter:
             for _step_idx, batch in enumerate(train_iter):
+                optimizer.zero_grad(set_to_none=True)  # Zero grad BEFORE forward for Opacus
                 
                 if dp_config.enabled and isinstance(batch, dict):
                     x_batch = batch['x'].to(device)
@@ -1630,8 +1704,8 @@ def train_stage3_with_dp(
                     # Wrapper squeezes batch dim from x, so squeeze targets too
                     if reg_targets_t.dim() == 3 and reg_targets_t.size(0) == 1:
                         reg_targets_t = reg_targets_t.squeeze(0)
-                    # Wrapper handles encoding internally, returns (logits, reg)
-                    _, reg_preds_t = model_for_training(x_batch)
+                    # RegressorOnlyWrapper returns only reg_preds (not tuple)
+                    reg_preds_t = model_for_training(x_batch)
                 else:
                     batch = batch.to(device)
                     _, reg_preds_t = base_model.forward_regressor(batch)
@@ -1651,29 +1725,25 @@ def train_stage3_with_dp(
                 num_nondelayed_per_ch = element_mask.sum(dim=0)
                 num_nondelayed = num_nondelayed_per_ch.sum()
 
+                # Always compute loss - use mask to weight elements
+                # If no non-delayed elements, loss will be ~0 but gradient graph is maintained
+                loss_per_element = reg_loss_fn(reg_preds_t, reg_targets_t) * element_mask
+                # Per-channel average loss (clamp to avoid div by zero)
+                loss_nondelayed_ch = loss_per_element.sum(dim=0) / num_nondelayed_per_ch.clamp_min(1.0)
+                loss = loss_nondelayed_ch.mean()
+                
                 if num_nondelayed > 0:
-                    optimizer.zero_grad(set_to_none=True)  # Zero grad BEFORE backward for Opacus
-                    
-                    # Huber loss in NORMALIZED space (keeps gradient graph), masked by denorm threshold
-                    loss_per_element = reg_loss_fn(reg_preds_t, reg_targets_t) * element_mask
-                    # Per-channel average loss, then macro-average
-                    loss_nondelayed_ch = loss_per_element.sum(dim=0) / num_nondelayed_per_ch.clamp_min(1.0)
-                    loss = loss_nondelayed_ch.mean()
                     total_nondelayed += num_nondelayed.item()
                     total_values += float(element_mask.numel())
-                    
-                    loss.backward()
-                    
-                    # Fill missing grad_sample for parameters where Opacus hooks failed
-                    if dp_config.enabled:
-                        _fill_missing_grad_samples(model_for_training, batch_size=1)
-                    
-                    optimizer.step()
-                    epoch_losses.append(float(loss.item()))
-                else:
-                    # No non-delayed elements in this batch; skip this step entirely
-                    # (don't call backward or optimizer.step as there's nothing to learn)
-                    epoch_losses.append(0.0)
+                
+                loss.backward()
+                
+                # Fill missing grad_sample for parameters where Opacus hooks failed
+                if dp_config.enabled:
+                    _fill_missing_grad_samples(model_for_training, batch_size=1)
+                
+                optimizer.step()
+                epoch_losses.append(float(loss.item()))
 
         # Calculate nondelayed ratio for this epoch
         nondelayed_ratio = (
@@ -1870,8 +1940,12 @@ def final_evaluation(
     if 'regressor_delayed' in checkpoint and 'regressor_nondelayed' in checkpoint:
         model.regressor_delayed = copy.deepcopy(model.regressor)
         model.regressor_nondelayed = copy.deepcopy(model.regressor)
-        model.regressor_delayed.load_state_dict(checkpoint['regressor_delayed'])
-        model.regressor_nondelayed.load_state_dict(checkpoint['regressor_nondelayed'])
+        # Make KAN layers Opacus-compatible (remove grid buffers) before loading
+        _make_kan_opacus_compatible(model.regressor_delayed)
+        _make_kan_opacus_compatible(model.regressor_nondelayed)
+        # Load with strict=False to handle any grid key mismatches
+        model.regressor_delayed.load_state_dict(checkpoint['regressor_delayed'], strict=False)
+        model.regressor_nondelayed.load_state_dict(checkpoint['regressor_nondelayed'], strict=False)
     else:
         model.regressor.load_state_dict(checkpoint['regressor'])
     
@@ -2065,7 +2139,7 @@ def final_evaluation(
         else:
             overshoot = final_epsilon - dp_config.target_epsilon
             print(f"  [!] Budget exceeded by {overshoot:.3f} eps ({overshoot/dp_config.target_epsilon*100:.1f}%)")
-    print(f"  Final δ: {final_delta:.2e}")
+    print(f"  Final delta: {final_delta:.2e}")
     
     print("\nTRAINING TIME:")
     total_time = stage1_time + stage2_time + stage3_time
@@ -2196,6 +2270,44 @@ def load_checkpoint(model, optimizer, path):
     pe_state = checkpoint.get('privacy_engine_state_dict', None)
     return epoch, loss, pe_state
 
+def _load_checkpoint_state_dict(model: nn.Module, state_dict: Dict, device: torch.device) -> None:
+    """Load state dict handling Opacus/wrapper prefixes.
+    
+    Checkpoints may have been saved from:
+    - GradSampleModule -> OpacusTensorOnlyWrapper -> SequentialTwoStagePredictor
+    - OpacusTensorOnlyWrapper -> SequentialTwoStagePredictor
+    - SequentialTwoStagePredictor directly
+    
+    This function tries to match keys by stripping common prefixes.
+    """
+    core = _core_model(model)
+    core_state = core.state_dict()
+    
+    # Possible prefixes used by Opacus wrappers
+    prefixes_to_try = [
+        '_module.model.',  # GradSampleModule -> OpacusTensorOnlyWrapper
+        '_module.',        # GradSampleModule
+        'model.',          # OpacusTensorOnlyWrapper
+        '',                # Direct match
+    ]
+    
+    new_state = {}
+    for key in core_state.keys():
+        matched = False
+        for prefix in prefixes_to_try:
+            full_key = prefix + key
+            if full_key in state_dict:
+                new_state[key] = state_dict[full_key]
+                matched = True
+                break
+        if not matched:
+            # Keep original value if not found in checkpoint
+            print(f"  [WARN] Key not found in checkpoint: {key}")
+            new_state[key] = core_state[key]
+    
+    core.load_state_dict(new_state, strict=False)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Three-stage DP-SGD for KAN-GAT with epsilon budget control")
     parser.add_argument('--data_source', type=str, default='cdata', choices=['cdata', 'udata'])
@@ -2213,16 +2325,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--use_node_level', action='store_true', default=True, help='Use node-level labels')
     parser.add_argument('--weather_file', type=str, default='weather_cn.npy')
     parser.add_argument('--period_hours', type=int, default=24)
-    parser.add_argument('--stage1_epochs', type=int, default=2)
-    parser.add_argument('--stage2_epochs', type=int, default=2)
-    parser.add_argument('--stage3_epochs', type=int, default=2, help='Epochs for non-delayed regressor')
+    parser.add_argument('--stage1_epochs', type=int, default=10)
+    parser.add_argument('--stage2_epochs', type=int, default=10)
+    parser.add_argument('--stage3_epochs', type=int, default=12, help='Epochs for non-delayed regressor')
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--lr', type=float, default=0.005)
     parser.add_argument('--patience', type=int, default=5)
     parser.add_argument('--dp', default=True, action='store_true', help='Enable DP-SGD (WARNING: Currently incompatible with PyG - will be disabled)')
     parser.add_argument('--target_epsilon', type=float, default=15.0, help='Target epsilon for tracking (not used for computing noise)')
     parser.add_argument('--target_delta', type=float, default=1e-5)
-    parser.add_argument('--noise_multiplier', type=float, default=1, help='Fixed noise multiplier for DP-SGD (lower=less noise, less privacy)')
+    parser.add_argument('--noise_multiplier', type=float, default=0.5, help='Fixed noise multiplier for DP-SGD (lower=less noise, less privacy)')
     parser.add_argument('--max_grad_norm', type=float, default=2.0, help='Max gradient norm for clipping (higher allows larger gradients)')
     parser.add_argument('--sample_rate', type=float, default=0.02)
     parser.add_argument('--epsilon_tolerance', type=float, default=0.05)
@@ -2240,6 +2352,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument('--seed', type=int, default=None, help='Random seed (None for random)')
     parser.add_argument('--balance_50_50', action='store_true', default=False, help='Apply random undersampling to achieve 50-50 class balance')
+    parser.add_argument('--skip_to_stage', type=int, default=1, choices=[1, 2, 3], help='Skip to stage N (loads checkpoints for prior stages)')
     return parser.parse_args()
 
 
@@ -2449,11 +2562,23 @@ def main() -> None:
     print(f"Test samples: {len(test_x)}")
     print(f"Class balance (delayed): {cls_pos_rate.mean().item():.2%}")
     
-    history_s1, accountant_s1_state, stage1_time = train_stage1_with_dp(
-        model, train_x, train_y_cls, val_x, val_y_cls,
-        edge_indices, device, args.stage1_epochs, args.lr,
-        pos_weight, args.patience, dp_config, args.batch_size,
-    )
+    # Skip to requested stage if checkpoints exist
+    if args.skip_to_stage > 1:
+        print(f"\n[SKIP] Skipping to Stage {args.skip_to_stage}, loading checkpoints...")
+        stage1_ckpt = os.path.join(CHECKPOINT_DIR, 'stage1_checkpoint.pth')
+        if os.path.exists(stage1_ckpt):
+            checkpoint = torch.load(stage1_ckpt, map_location=device, weights_only=False)
+            _load_checkpoint_state_dict(model, checkpoint['model_state_dict'], device)
+            print(f"  [OK] Loaded Stage 1 checkpoint from {stage1_ckpt}")
+        else:
+            raise FileNotFoundError(f"Stage 1 checkpoint not found: {stage1_ckpt}")
+        history_s1, accountant_s1_state, stage1_time = [], None, 0.0
+    else:
+        history_s1, accountant_s1_state, stage1_time = train_stage1_with_dp(
+            model, train_x, train_y_cls, val_x, val_y_cls,
+            edge_indices, device, args.stage1_epochs, args.lr,
+            pos_weight, args.patience, dp_config, args.batch_size,
+        )
 
     # Stage 2 delayed-sample diagnostics (sample-level, not node-level)
     cls_delayed_per_sample = (train_y_cls >= args.class_threshold)
@@ -2478,20 +2603,37 @@ def main() -> None:
     print(f"\n[STAGE 2 DIAGNOSTIC] Delayed samples by cls threshold: {delayed_samples_cls}/{len(train_x)}")
     print(f"[STAGE 2 DIAGNOSTIC] Delayed samples by reg threshold: {delayed_samples_reg}/{len(train_x)}")
     
-    history_s2, accountant_s2_state, stage2_time = train_stage2_with_dp(
-        model, train_x, train_y_reg, train_y_cls,
-        val_x, val_y_reg, val_y_cls, edge_indices, device,
-        args.stage2_epochs, args.lr, scaler, args.class_threshold, args.delay_threshold,
-        args.patience, dp_config, args.batch_size, accountant_s1_state,
-    )
+    if args.skip_to_stage > 2:
+        print(f"\n[SKIP] Skipping Stage 2, loading checkpoint...")
+        stage2_ckpt = os.path.join(CHECKPOINT_DIR, 'stage2_checkpoint.pth')
+        if os.path.exists(stage2_ckpt):
+            checkpoint = torch.load(stage2_ckpt, map_location=device, weights_only=False)
+            _load_checkpoint_state_dict(model, checkpoint['model_state_dict'], device)
+            print(f"  [OK] Loaded Stage 2 checkpoint from {stage2_ckpt}")
+        else:
+            raise FileNotFoundError(f"Stage 2 checkpoint not found: {stage2_ckpt}")
+        history_s2, accountant_s2_state, stage2_time = [], None, 0.0
+    else:
+        history_s2, accountant_s2_state, stage2_time = train_stage2_with_dp(
+            model, train_x, train_y_reg, train_y_cls,
+            val_x, val_y_reg, val_y_cls, edge_indices, device,
+            args.stage2_epochs, args.lr, scaler, args.class_threshold, args.delay_threshold,
+            args.patience, dp_config, args.batch_size, accountant_s1_state,
+        )
 
     # Preserve the delayed-flight regressor learned in Stage 2.
     # Stage 3 will train a separate regressor for non-delayed flights.
     base_model = _core_model(model)
     base_model.regressor_delayed = copy.deepcopy(base_model.regressor).to(device)
+    # Freeze the delayed regressor so it's not trained in Stage 3
+    for param in base_model.regressor_delayed.parameters():
+        param.requires_grad = False
 
     # Initialize a fresh copy to train on non-delayed flights.
     base_model.regressor = copy.deepcopy(base_model.regressor_delayed).to(device)
+    # Unfreeze the new regressor copy for training
+    for param in base_model.regressor.parameters():
+        param.requires_grad = True
     
     history_s3, accountant_s3_state, stage3_time = train_stage3_with_dp(
         model, train_x, train_y_reg, train_y_cls,

@@ -1647,9 +1647,10 @@ def parse_args() -> argparse.Namespace:
         choices=[3, 6, 12, 24],
         help='Train/test ONLY this horizon (choose one of 3, 6, 12, 24). Example: --horizons 24',
     )
-    parser.add_argument('--delay_threshold', type=float, default=5.0)
+    parser.add_argument('--delay_threshold', type=float, default=10.0)
     parser.add_argument('--class_threshold', type=float, default=0.5)
     parser.add_argument('--use_node_level', action='store_true', default=True, help='Use node-level labels')
+    parser.add_argument('--exclude_time_features', default=False, action='store_true', help='Exclude time features (hour, day of week) from input')
     parser.add_argument('--weather_file', type=str, default='weather_cn.npy')
     parser.add_argument('--period_hours', type=int, default=24)
     parser.add_argument('--stage1_epochs', type=int, default=10)
@@ -1672,7 +1673,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--epsilon',
         type=float,
-        default=7.5,
+        default=15,
         help='Target epsilon (used for tracking; and with --epsilonfixed for noise calibration)'
     )
     # Backward-compatible alias (do not advertise)
@@ -1698,9 +1699,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--epsilonfixed',
         dest='epsilonfixed',
-        action='store_true',
-        default=True,
-        help='Enable epsilon-calibrated DP-SGD (uses Opacus make_private_with_epsilon) [DEFAULT]'
+        action='store_false',
+        help='Enable epsilon-calibrated DP-SGD (uses Opacus make_private_with_epsilon)'
     )
     # Backward-compatible alias (do not advertise)
     parser.add_argument('--make_private', dest='epsilonfixed', action='store_true', help=argparse.SUPPRESS)
@@ -1743,6 +1743,17 @@ def main() -> None:
             f"Pass exactly one value via --horizons (3/6/12/24). Got: {args.horizons}"
         )
     max_horizon = horizons[0]
+    
+    # Optionally exclude time features (last 2 columns: hour and day_of_week)
+    if args.exclude_time_features:
+        print(f"\n[FEATURE FILTERING] Excluding time features from input")
+        print(f"  Original feature dimension: {train_inputs.shape[2]}")
+        # Assuming last 2 features are time-based (hour, day_of_week)
+        train_inputs = train_inputs[:, :, :-2]
+        val_inputs = val_inputs[:, :, :-2]
+        test_inputs = test_inputs[:, :, :-2]
+        print(f"  New feature dimension: {train_inputs.shape[2]}")
+    
     feature_dim = train_inputs.shape[2]
     delay_dim = train_delay_scaled.shape[2]
     in_channels = args.seq_len * feature_dim
@@ -1938,8 +1949,8 @@ def main() -> None:
 
     privacy_engine = None
     dp_enabled = bool(getattr(args, "dp", False) or getattr(args, "epsilonfixed", False))
-    tracking_target_epsilon = float(args.epsilon)
-    effective_noise_multiplier = float(args.noise_multiplier)
+    tracking_target_epsilon = float(args.epsilon) if dp_enabled else 0.0
+    effective_noise_multiplier = float(args.noise_multiplier) if dp_enabled else 0.0
     if dp_enabled:
         if not OPACUS_AVAILABLE:
             raise ImportError(
@@ -2084,15 +2095,15 @@ def main() -> None:
         final_epsilon = _safe_get_epsilon(privacy_engine, float(args.target_delta))
         final_delta = float(args.target_delta)
     else:
-        final_epsilon = float("inf")
+        final_epsilon = 0.0
         final_delta = 0.0
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    sigma_val = float(effective_noise_multiplier) if dp_enabled else 0.0
+    sigma_val = 0.0 if not dp_enabled else float(effective_noise_multiplier)
     run_tag = _run_tag(
         train_script=__file__,
         data_source=str(args.data_source),
-        noise_multiplier=float(effective_noise_multiplier),
+        noise_multiplier=sigma_val,
         dp_enabled=dp_enabled,
     )
 

@@ -3,9 +3,9 @@ COMPREHENSIVE EVALUATION RESULTS
 ================================================================================
 
 MODEL INFORMATION
-Model Path,checkpoints\run_20260121_102719_pid22176_2a8ee8\cnnopacus_cdata_sigma0_00_model_eps0.00_20260121_113759.pth
+Model Path,checkpoints\run_20260121_123432_pid7804_a1e0c3\cnnopacus_cdata_sigma0_00_model_eps0.00_20260121_132122.pth
 Run Tag,cnnopacus_cdata_sigma0_00
-Timestamp,20260121_113759
+Timestamp,20260121_132122
 Artifact Prefix,train
 
 === COMMAND-LINE ARGUMENTS ===
@@ -15,15 +15,15 @@ horizons,12
 delay_threshold,5.0 min
 class_threshold,0.5
 use_node_level,True
-exclude_time_features,False
+exclude_time_features,True
 weather_file,weather_cn.npy
 period_hours,24
-stage1_epochs,10
+stage1_epochs,15
 stage2_epochs,10
-stage3_epochs,20
+stage3_epochs,14
 batch_size,128
-lr,0.001
-patience,10
+lr,0.005
+patience,5
 dp,False
 dp_accountant,rdp
 epsilon (target),15.000
@@ -32,7 +32,7 @@ noise_multiplier,0.0
 max_grad_norm,2.0
 sample_rate,0.02
 epsilon_tolerance,0.05
-model_path,checkpoints\run_20260121_102719_pid22176_2a8ee8\cnnopacus_cdata_sigma0_00_model_eps0.00_20260121_113759.pth
+model_path,checkpoints\run_20260121_123432_pid7804_a1e0c3\cnnopacus_cdata_sigma0_00_model_eps0.00_20260121_132122.pth
 checkpoint_dir,auto
 seed,
 balance_50_50,False
@@ -50,72 +50,72 @@ Test Samples,5458
 CLASSIFICATION METRICS (Macro over Arrival/Departure)
 ================================================================================
 Metric,Value
-Precision,0.1549
-Recall,0.1069
-F1 Score,0.1074
-Accuracy,0.6800
+Precision,0.4730
+Recall,0.8291
+F1 Score,0.6019
+Accuracy,0.7352
 
 Per-Channel Metrics:
 Channel,Precision,Recall,F1 Score,Accuracy
-Arrival,0.2117,0.2125,0.2121,0.5827
-Departure,0.0981,0.0013,0.0027,0.7773
+Arrival,0.4874,0.8056,0.6073,0.7247
+Departure,0.4586,0.8527,0.5964,0.7458
 
 ================================================================================
 OVERALL SUMMARY TABLE
 ================================================================================
 Epsilon,Overall MAE (min),Arrival MAE (min),Departure MAE (min),Precision,Recall,F1 Score,Accuracy
-0.00,6.9439,7.1333,6.7544,0.1549,0.1069,0.1074,0.6800
+0.00,5.3520,5.4787,5.2253,0.4730,0.8291,0.6019,0.7352
 
 ================================================================================
 DETAILED METRICS - DELAYED (>5.0 min)
 ================================================================================
 Group,Samples,Arrival MAE,Arrival RMSE,Arrival R2,Departure MAE,Departure RMSE,Departure R2,Mean Arr Pred,Mean Arr Target,Mean Dep Pred,Mean Dep Target
-Delayed,132249,10.8855,13.1545,-1.4869,11.8586,14.1757,-1.8575,6.45,16.90,5.18,16.93
+Delayed,132249,7.7830,10.0832,-0.4612,7.7068,9.9398,-0.4049,11.19,16.90,11.61,16.93
 
 ================================================================================
 DETAILED METRICS - NON-DELAYED (<= 5.0 min)
 ================================================================================
 Group,Samples,Arrival MAE,Arrival RMSE,Arrival R2,Departure MAE,Departure RMSE,Departure R2,Mean Arr Pred,Mean Arr Target,Mean Dep Pred,Mean Dep Target
-Non-delayed,413551,5.7852,6.9297,-21.5210,5.3124,5.9441,-15.9567,7.53,1.80,7.13,1.85
+Non-delayed,413551,4.6508,6.2351,-17.2322,4.5242,6.2327,-17.6435,6.45,1.80,6.37,1.85
 
 ================================================================================
 "SUMMARY (raw metric/value, matches summary CSV)"
 ================================================================================
 metric,value
-classification_precision,0.15487548036718277
-classification_recall,0.10690947625234169
-classification_f1,0.10736864294584156
-classification_accuracy,0.6799926713081466
-classification_precision_arrival,0.21168800674039537
-classification_recall_arrival,0.21247157988129922
-classification_f1_arrival,0.2120790645421622
-classification_accuracy_arrival,0.5827079516306125
-classification_precision_departure,0.09806295399397018
-classification_recall_departure,0.0013473726233841764
-classification_f1_departure,0.002658221349520942
-classification_accuracy_departure,0.7772773909856805
-regression_mae_delayed,11.32780357749371
-regression_rmse_delayed,13.62823416167445
-regression_mae_nondelayed,5.541944316028397
-regression_rmse_nondelayed,6.441449894522449
-regression_mae_overall,6.94387561223493
-regression_rmse_overall,8.743066788083414
-regression_mae_delayed_arrival,10.885456142939395
-regression_rmse_delayed_arrival,13.154534158562205
+classification_precision,0.473005748072217
+classification_recall,0.8291426630867297
+classification_f1,0.6018893869627245
+classification_accuracy,0.7352400146573567
+classification_precision_arrival,0.48740940813309563
+classification_recall_arrival,0.805564797870459
+classification_f1_arrival,0.6073436832429732
+classification_accuracy_arrival,0.7246830340783904
+classification_precision_departure,0.4586020880113384
+classification_recall_departure,0.8527205283030004
+classification_f1_departure,0.5964350906824759
+classification_accuracy_departure,0.7457969952363229
+regression_mae_delayed,7.748329896718843
+regression_rmse_delayed,10.018263334215316
+regression_mae_nondelayed,4.58565951249694
+regression_rmse_nondelayed,6.233869255110573
+regression_mae_overall,5.351984165562098
+regression_rmse_overall,7.332383451748692
+regression_mae_delayed_arrival,7.782973290670232
+regression_rmse_delayed_arrival,10.08318476641346
 num_delayed_samples_arrival,72132
-regression_mae_delayed_departure,11.858558690843873
-regression_rmse_delayed_departure,14.175732452560599
+regression_mae_delayed_departure,7.7067626646130885
+regression_rmse_delayed_departure,9.939807081640966
 num_delayed_samples_departure,60117
-regression_mae_nondelayed_arrival,5.78524001909078
-regression_rmse_nondelayed_arrival,6.929723418136647
+regression_mae_nondelayed_arrival,4.650809420724211
+regression_rmse_nondelayed_arrival,6.2350764992940935
 num_nondelayed_samples_arrival,200768
-regression_mae_nondelayed_departure,5.312386542557637
-regression_rmse_nondelayed_departure,5.944084566752239
+regression_mae_nondelayed_departure,4.524188357494081
+regression_rmse_nondelayed_departure,6.232729964746057
 num_nondelayed_samples_departure,212783
-regression_mae_overall_arrival,7.13331180159517
-regression_rmse_overall_arrival,9.003672225441099
-regression_mae_overall_departure,6.754439422874692
-regression_rmse_overall_departure,8.474451025204816
+regression_mae_overall_arrival,5.478692323864361
+regression_rmse_overall_arrival,7.448072956398638
+regression_mae_overall_departure,5.225276007259834
+regression_rmse_overall_departure,7.214839111381445
 num_delayed_samples,132249
 num_nondelayed_samples,413551
 target_epsilon,15.0
@@ -123,11 +123,11 @@ final_epsilon,0.0
 epsilon_exceeded,False
 epsilon_overshoot,0.0
 final_delta,0.0
-stage1_time_seconds,1416.5819215774536
-stage2_time_seconds,1375.3868753910065
-stage3_time_seconds,1445.4156193733215
-total_training_time_seconds,4237.384416341782
-total_training_time_minutes,70.62307360569636
+stage1_time_seconds,992.4567768573761
+stage2_time_seconds,778.6227717399597
+stage3_time_seconds,1034.6575348377228
+total_training_time_seconds,2805.7370834350586
+total_training_time_minutes,46.762284723917645
 train_samples,19191
 val_samples,2711
 test_samples,5458

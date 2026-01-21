@@ -800,7 +800,7 @@ def train_stage3_opacus(
     for p in base.regressor.parameters():
         p.requires_grad = True
 
-    _set_optimizer_hparams(optimizer, lr=lr * 0.01, weight_decay=1e-5)
+    _set_optimizer_hparams(optimizer, lr=lr, weight_decay=1e-5)
     reg_loss_fn = nn.HuberLoss(reduction="none", delta=1.0)
 
     if scaler is not None and hasattr(scaler, "mean") and hasattr(scaler, "std"):
@@ -1688,7 +1688,7 @@ def load_checkpoint(model, optimizer, path):
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Three-stage CNN (with optional DP-SGD) with epsilon tracking")
     parser.add_argument('--data_source', type=str, default='cdata', choices=['cdata', 'udata'])
-    parser.add_argument('--seq_len', type=int, default=8)
+    parser.add_argument('--seq_len', type=int, default=24)
     parser.add_argument(
         '--horizons',
         type=int,
@@ -1703,11 +1703,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--exclude_time_features', default=True, action='store_true', help='Exclude time features (hour, day of week) from input')
     parser.add_argument('--weather_file', type=str, default='weather_cn.npy')
     parser.add_argument('--period_hours', type=int, default=24)
-    parser.add_argument('--stage1_epochs', type=int, default=8)
+    parser.add_argument('--stage1_epochs', type=int, default=15)
     parser.add_argument('--stage2_epochs', type=int, default=10)
     parser.add_argument('--stage3_epochs', type=int, default=14, help='Epochs for non-delayed regressor')
     parser.add_argument('--batch_size', type=int, default=128)
-    parser.add_argument('--lr', type=float, default=0.005)
+    parser.add_argument('--lr', type=float, default=0.005, help='Global learning rate (used if stage-specific LRs not provided)')
+    parser.add_argument('--stage1_lr', type=float, default=None, help='Learning rate for Stage 1 (classifier)')
+    parser.add_argument('--stage2_lr', type=float, default=None, help='Learning rate for Stage 2 (delayed regressor)')
+    parser.add_argument('--stage3_lr', type=float, default=None, help='Learning rate for Stage 3 (non-delayed regressor)')
     parser.add_argument('--patience', type=int, default=5)
     parser.add_argument('--dp', default=False, action='store_true', help='Enable DP-SGD')
     parser.add_argument('--dp_accountant',type=str,default='rdp',choices=['rdp', 'prv', 'gdp'],help="Opacus privacy accountant. 'prv' can be memory-heavy and may crash on large runs; 'rdp' is usually much lighter.")    
@@ -2052,6 +2055,13 @@ def main() -> None:
     else:
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
 
+    # Resolve per-stage learning rates (use stage-specific if provided, else fall back to global lr)
+    stage1_lr = args.stage1_lr if args.stage1_lr is not None else args.lr
+    stage2_lr = args.stage2_lr if args.stage2_lr is not None else args.lr
+    stage3_lr = args.stage3_lr if args.stage3_lr is not None else (args.lr * 0.01)  # Default: 1% of global LR
+    
+    print(f"\n[LEARNING RATES] Stage 1: {stage1_lr}, Stage 2: {stage2_lr}, Stage 3: {stage3_lr}")
+
     history_s1, stage1_time = train_stage1_opacus(
         model=model,
         optimizer=optimizer,
@@ -2060,7 +2070,7 @@ def main() -> None:
         val_loader=val_loader,
         device=device,
         epochs=args.stage1_epochs,
-        lr=args.lr,
+        lr=stage1_lr,
         pos_weight=pos_weight,
         patience=args.patience,
         target_delta=float(args.target_delta),
@@ -2098,7 +2108,7 @@ def main() -> None:
         val_loader=val_loader,
         device=device,
         epochs=args.stage2_epochs,
-        lr=args.lr,
+        lr=stage2_lr,
         scaler=scaler,
         delay_threshold=float(args.delay_threshold),
         patience=args.patience,
@@ -2119,7 +2129,7 @@ def main() -> None:
         val_loader=val_loader,
         device=device,
         epochs=args.stage3_epochs,
-        lr=args.lr,
+        lr=stage3_lr,
         scaler=scaler,
         delay_threshold=float(args.delay_threshold),
         patience=args.patience,

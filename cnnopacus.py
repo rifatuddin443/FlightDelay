@@ -77,7 +77,7 @@ def _run_tag(*, train_script: str, data_source: str, noise_multiplier: float, dp
     return f"{_script_stem(train_script)}_{data_source}_{_sigma_tag(noise_multiplier, dp_enabled)}"
 
 
-def _ensure_tagged_filename(path: str, *, run_tag: str, timestamp: str, suffix: str, ext: str) -> str:
+def _ensure_tagged_filename(path: str, *, run_tag: str, timestamp: str, suffix: str, ext: str, epsilon: Optional[float] = None) -> str:
     """Return a filename which always includes run_tag and timestamp.
 
     If `path` contains a directory, it is preserved.
@@ -91,7 +91,8 @@ def _ensure_tagged_filename(path: str, *, run_tag: str, timestamp: str, suffix: 
         ext = existing_ext
 
     # Always enforce naming for reproducibility
-    filename = f"{run_tag}_{suffix}_{timestamp}{ext}"
+    epsilon_tag = f"_eps{epsilon:.2f}" if epsilon is not None else ""
+    filename = f"{run_tag}_{suffix}{epsilon_tag}_{timestamp}{ext}"
     return os.path.join(directory, filename) if directory else filename
 
 # Import visualization functions
@@ -523,6 +524,11 @@ def train_stage1_opacus(
 
     _set_optimizer_hparams(optimizer, lr=lr, weight_decay=1e-4)
     cls_loss_fn = FocalLoss(alpha=pos_weight.to(device), gamma=2.0, reduction="mean")
+    
+    # Learning rate scheduler
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='max', factor=0.5, patience=patience//2, min_lr=lr*0.01
+    )
 
     history: List[Dict] = []
     best_f1 = 0.0
@@ -588,12 +594,16 @@ def train_stage1_opacus(
         eps_str = (
             f"ε: {current_epsilon:.3f}/{target_epsilon}" if privacy_engine is not None else "No DP"
         )
+        current_lr = optimizer.param_groups[0]['lr']
         print(
             f"Epoch {epoch}/{epochs} | Loss: {history[-1]['train_loss']:.4f} | "
             f"Val F1 (macro): {val_metrics['f1']:.4f} "
             f"[arr {val_metrics['f1_arrival']:.4f}, dep {val_metrics['f1_departure']:.4f}] | "
-            f"{eps_str} | Steps: {step_count} | Time: {epoch_time:.2f}s"
+            f"{eps_str} | LR: {current_lr:.6f} | Steps: {step_count} | Time: {epoch_time:.2f}s"
         )
+        
+        # Step scheduler
+        scheduler.step(val_metrics['f1'])
 
         if float(val_metrics["f1"]) > best_f1:
             best_f1 = float(val_metrics["f1"])
@@ -631,6 +641,7 @@ def train_stage2_opacus(
     patience: int,
     target_delta: float,
     target_epsilon: float,
+    freeze_encoder: bool = False,
 ) -> Tuple[List[Dict], float]:
     """Stage 2: delayed-flight regressor fine-tuning (Opacus).
 
@@ -643,15 +654,28 @@ def train_stage2_opacus(
 
     base = _unwrap_opacus_model(model)
 
+    # Keep encoder trainable by default for better learning
+    # Only freeze if explicitly requested via freeze_encoder_stage2
     for p in base.encoder.parameters():
-        p.requires_grad = False
+        p.requires_grad = not freeze_encoder
     for p in base.classifier.parameters():
         p.requires_grad = False
     for p in base.regressor.parameters():
         p.requires_grad = True
+    
+    # Reset optimizer momentum for fresh start
+    for group in optimizer.param_groups:
+        for key in ['momentum_buffer', 'exp_avg', 'exp_avg_sq']:
+            if key in group:
+                del group[key]
 
     _set_optimizer_hparams(optimizer, lr=lr, weight_decay=1e-4)
     huber_loss = nn.HuberLoss(reduction="none", delta=2.0)
+    
+    # Learning rate scheduler for Stage 2
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=patience//2,min_lr=lr*0.001
+    )
 
     if scaler is not None and hasattr(scaler, "mean") and hasattr(scaler, "std"):
         mean_t = torch.tensor(np.array(scaler.mean, dtype=np.float32), device=device)
@@ -737,11 +761,15 @@ def train_stage2_opacus(
         eps_str = (
             f"ε: {current_epsilon:.3f}/{target_epsilon}" if privacy_engine is not None else "No DP"
         )
+        current_lr = optimizer.param_groups[0]['lr']
         print(
             f"Epoch {epoch}/{epochs} | Train Loss: {history[-1]['train_loss']:.4f} | "
             f"Val Loss: {val_loss:.4f} | Masked: {masked_ratio*100:.1f}% "
-            f"(val {val_masked_ratio*100:.1f}%) | {eps_str} | Time: {epoch_time:.2f}s"
+            f"(val {val_masked_ratio*100:.1f}%) | {eps_str} | LR: {current_lr:.6f} | Time: {epoch_time:.2f}s"
         )
+        
+        # Step scheduler
+        scheduler.step(val_loss)
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -799,8 +827,13 @@ def train_stage3_opacus(
     for p in base.regressor.parameters():
         p.requires_grad = True
 
-    _set_optimizer_hparams(optimizer, lr=lr * 0.01, weight_decay=1e-5)
+    _set_optimizer_hparams(optimizer, lr=lr*2, weight_decay=1e-5)
     reg_loss_fn = nn.HuberLoss(reduction="none", delta=1.0)
+    
+    # Learning rate scheduler for Stage 3
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=patience//2, min_lr=lr*0.001
+    )
 
     if scaler is not None and hasattr(scaler, "mean") and hasattr(scaler, "std"):
         mean_t = torch.tensor(np.array(scaler.mean, dtype=np.float32), device=device)
@@ -909,12 +942,16 @@ def train_stage3_opacus(
         eps_str = (
             f"ε: {current_epsilon:.3f}/{target_epsilon}" if privacy_engine is not None else "No DP"
         )
+        current_lr = optimizer.param_groups[0]['lr']
         print(
             f"Epoch {epoch}/{epochs} | Loss: {history[-1]['train_loss']:.4f} | "
             f"Val: {val_loss:.4f} | Non-delayed: {total_nondelayed:.0f} "
             f"({nondelayed_ratio*100:.1f}%) | Val ND: {val_nondelayed:.0f} "
-            f"({val_nondelayed_ratio*100:.1f}%) | {eps_str} | Time: {epoch_time:.2f}s"
+            f"({val_nondelayed_ratio*100:.1f}%) | {eps_str} | LR: {current_lr:.6f} | Time: {epoch_time:.2f}s"
         )
+        
+        # Step scheduler
+        scheduler.step(val_loss)
 
         if val_loss < best_val_loss and val_nondelayed > 0:
             best_val_loss = val_loss
@@ -968,6 +1005,9 @@ def final_evaluation(
     *,
     save_model: bool = True,
     artifact_prefix: str = "train",
+    seq_len: Optional[int] = None,
+    args: Optional[object] = None,
+    checkpoint_dir: Optional[str] = None,
 ) -> None:
     """Final evaluation and export with Stage 3 regressor."""
     model = _unwrap_opacus_model(model)  # type: ignore[assignment]
@@ -1293,9 +1333,9 @@ def final_evaluation(
     print(f"  Train: {train_samples} | Val: {val_samples} | Test: {len(test_x)}")
     
     out_dir = os.path.dirname(model_path)
-    history_csv = os.path.join(out_dir, f"{run_tag}_{artifact_prefix}_history_{timestamp}.csv") if out_dir else f"{run_tag}_{artifact_prefix}_history_{timestamp}.csv"
-    summary_csv = os.path.join(out_dir, f"{run_tag}_{artifact_prefix}_summary_{timestamp}.csv") if out_dir else f"{run_tag}_{artifact_prefix}_summary_{timestamp}.csv"
-    results_table_csv = os.path.join(out_dir, f"{run_tag}_{artifact_prefix}_results_table_{timestamp}.csv") if out_dir else f"{run_tag}_{artifact_prefix}_results_table_{timestamp}.csv"
+    epsilon_tag = f"_eps{final_epsilon:.2f}" if dp_enabled else ""
+    history_csv = os.path.join(out_dir, f"{run_tag}_{artifact_prefix}_history{epsilon_tag}_{timestamp}.csv") if out_dir else f"{run_tag}_{artifact_prefix}_history{epsilon_tag}_{timestamp}.csv"
+    results_table_csv = os.path.join(out_dir, f"{run_tag}_{artifact_prefix}_results_table{epsilon_tag}_{timestamp}.csv") if out_dir else f"{run_tag}_{artifact_prefix}_results_table{epsilon_tag}_{timestamp}.csv"
     
     # Export history
     if histories:
@@ -1305,74 +1345,69 @@ def final_evaluation(
             writer.writeheader()
             writer.writerows(histories)
     
-    # Export summary
-    with open(summary_csv, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(['metric', 'value'])
-        summary = {
-            # Classification metrics (macro-averaged)
-            'classification_precision': test_cls_metrics['precision'],
-            'classification_recall': test_cls_metrics['recall'],
-            'classification_f1': test_cls_metrics['f1'],
-            'classification_accuracy': test_cls_metrics['accuracy'],
-            # Classification metrics (per-channel: arrival)
-            'classification_precision_arrival': test_cls_metrics['precision_arrival'],
-            'classification_recall_arrival': test_cls_metrics['recall_arrival'],
-            'classification_f1_arrival': test_cls_metrics['f1_arrival'],
-            'classification_accuracy_arrival': test_cls_metrics['accuracy_arrival'],
-            # Classification metrics (per-channel: departure)
-            'classification_precision_departure': test_cls_metrics['precision_departure'],
-            'classification_recall_departure': test_cls_metrics['recall_departure'],
-            'classification_f1_departure': test_cls_metrics['f1_departure'],
-            'classification_accuracy_departure': test_cls_metrics['accuracy_departure'],
-            # Regression metrics (overall/flattened)
-            'regression_mae_delayed': mae_delayed,
-            'regression_rmse_delayed': rmse_delayed,
-            'regression_mae_nondelayed': mae_nondelayed,
-            'regression_rmse_nondelayed': rmse_nondelayed,
-            'regression_mae_overall': mae_overall,
-            'regression_rmse_overall': rmse_overall,
-            # Regression metrics (per-channel: arrival - delayed)
-            'regression_mae_delayed_arrival': arr_mae_d,
-            'regression_rmse_delayed_arrival': arr_rmse_d,
-            'num_delayed_samples_arrival': int(arr_n_d),
-            # Regression metrics (per-channel: departure - delayed)
-            'regression_mae_delayed_departure': dep_mae_d,
-            'regression_rmse_delayed_departure': dep_rmse_d,
-            'num_delayed_samples_departure': int(dep_n_d),
-            # Regression metrics (per-channel: arrival - non-delayed)
-            'regression_mae_nondelayed_arrival': arr_mae_nd,
-            'regression_rmse_nondelayed_arrival': arr_rmse_nd,
-            'num_nondelayed_samples_arrival': int(arr_n_nd),
-            # Regression metrics (per-channel: departure - non-delayed)
-            'regression_mae_nondelayed_departure': dep_mae_nd,
-            'regression_rmse_nondelayed_departure': dep_rmse_nd,
-            'num_nondelayed_samples_departure': int(dep_n_nd),
-            # Regression metrics (per-channel: arrival - overall)
-            'regression_mae_overall_arrival': arr_mae_all,
-            'regression_rmse_overall_arrival': arr_rmse_all,
-            # Regression metrics (per-channel: departure - overall)
-            'regression_mae_overall_departure': dep_mae_all,
-            'regression_rmse_overall_departure': dep_rmse_all,
-            # Sample counts
-            'num_delayed_samples': int(delayed_mask.sum()),
-            'num_nondelayed_samples': int(nondelayed_mask.sum()),
-            'target_epsilon': float(target_epsilon),
-            'final_epsilon': final_epsilon,
-            'epsilon_exceeded': (final_epsilon > float(target_epsilon)) if dp_enabled else False,
-            'epsilon_overshoot': max(0.0, final_epsilon - float(target_epsilon)) if dp_enabled else 0.0,
-            'final_delta': final_delta,
-            'stage1_time_seconds': stage1_time,
-            'stage2_time_seconds': stage2_time,
-            'stage3_time_seconds': stage3_time,
-            'total_training_time_seconds': total_time,
-            'total_training_time_minutes': total_time / 60,
-            'train_samples': train_samples,
-            'val_samples': val_samples,
-            'test_samples': len(test_x),
-        }
-        for k, v in summary.items():
-            writer.writerow([k, v])
+    # Prepare summary metrics for results table (no separate summary CSV)
+    summary = {
+        # Classification metrics (macro-averaged)
+        'classification_precision': test_cls_metrics['precision'],
+        'classification_recall': test_cls_metrics['recall'],
+        'classification_f1': test_cls_metrics['f1'],
+        'classification_accuracy': test_cls_metrics['accuracy'],
+        # Classification metrics (per-channel: arrival)
+        'classification_precision_arrival': test_cls_metrics['precision_arrival'],
+        'classification_recall_arrival': test_cls_metrics['recall_arrival'],
+        'classification_f1_arrival': test_cls_metrics['f1_arrival'],
+        'classification_accuracy_arrival': test_cls_metrics['accuracy_arrival'],
+        # Classification metrics (per-channel: departure)
+        'classification_precision_departure': test_cls_metrics['precision_departure'],
+        'classification_recall_departure': test_cls_metrics['recall_departure'],
+        'classification_f1_departure': test_cls_metrics['f1_departure'],
+        'classification_accuracy_departure': test_cls_metrics['accuracy_departure'],
+        # Regression metrics (overall/flattened)
+        'regression_mae_delayed': mae_delayed,
+        'regression_rmse_delayed': rmse_delayed,
+        'regression_mae_nondelayed': mae_nondelayed,
+        'regression_rmse_nondelayed': rmse_nondelayed,
+        'regression_mae_overall': mae_overall,
+        'regression_rmse_overall': rmse_overall,
+        # Regression metrics (per-channel: arrival - delayed)
+        'regression_mae_delayed_arrival': arr_mae_d,
+        'regression_rmse_delayed_arrival': arr_rmse_d,
+        'num_delayed_samples_arrival': int(arr_n_d),
+        # Regression metrics (per-channel: departure - delayed)
+        'regression_mae_delayed_departure': dep_mae_d,
+        'regression_rmse_delayed_departure': dep_rmse_d,
+        'num_delayed_samples_departure': int(dep_n_d),
+        # Regression metrics (per-channel: arrival - non-delayed)
+        'regression_mae_nondelayed_arrival': arr_mae_nd,
+        'regression_rmse_nondelayed_arrival': arr_rmse_nd,
+        'num_nondelayed_samples_arrival': int(arr_n_nd),
+        # Regression metrics (per-channel: departure - non-delayed)
+        'regression_mae_nondelayed_departure': dep_mae_nd,
+        'regression_rmse_nondelayed_departure': dep_rmse_nd,
+        'num_nondelayed_samples_departure': int(dep_n_nd),
+        # Regression metrics (per-channel: arrival - overall)
+        'regression_mae_overall_arrival': arr_mae_all,
+        'regression_rmse_overall_arrival': arr_rmse_all,
+        # Regression metrics (per-channel: departure - overall)
+        'regression_mae_overall_departure': dep_mae_all,
+        'regression_rmse_overall_departure': dep_rmse_all,
+        # Sample counts
+        'num_delayed_samples': int(delayed_mask.sum()),
+        'num_nondelayed_samples': int(nondelayed_mask.sum()),
+        'target_epsilon': float(target_epsilon),
+        'final_epsilon': final_epsilon,
+        'epsilon_exceeded': (final_epsilon > float(target_epsilon)) if dp_enabled else False,
+        'epsilon_overshoot': max(0.0, final_epsilon - float(target_epsilon)) if dp_enabled else 0.0,
+        'final_delta': final_delta,
+        'stage1_time_seconds': stage1_time,
+        'stage2_time_seconds': stage2_time,
+        'stage3_time_seconds': stage3_time,
+        'total_training_time_seconds': total_time,
+        'total_training_time_minutes': total_time / 60,
+        'train_samples': train_samples,
+        'val_samples': val_samples,
+        'test_samples': len(test_x),
+    }
 
     # Export comprehensive results table (evaluate_regression_v4-style)
     def _safe_r2(y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -1433,13 +1468,44 @@ def final_evaluation(
         writer.writerow(["Run Tag", run_tag])
         writer.writerow(["Timestamp", timestamp])
         writer.writerow(["Artifact Prefix", artifact_prefix])
-        writer.writerow(["Horizons", ",".join(str(h) for h in horizons)])
-        writer.writerow(["Delay Threshold", f"{delay_threshold} min (Delayed if > threshold)"])
-        writer.writerow(["Classification Threshold", class_threshold])
-        writer.writerow(["DP Enabled", dp_enabled])
-        writer.writerow(["Noise Multiplier (sigma)", float(noise_multiplier)])
-        writer.writerow(["Final Epsilon", f"{final_epsilon:.3f}"]) 
-        writer.writerow(["Target Epsilon", f"{float(target_epsilon):.3f}"])
+        writer.writerow([])
+        
+        writer.writerow(["=== COMMAND-LINE ARGUMENTS ==="])
+        if args is not None:
+            writer.writerow(["data_source", getattr(args, 'data_source', 'N/A')])
+            writer.writerow(["seq_len", getattr(args, 'seq_len', seq_len)])
+            writer.writerow(["horizons", ",".join(str(h) for h in horizons)])
+            writer.writerow(["delay_threshold", f"{delay_threshold} min"])
+            writer.writerow(["class_threshold", class_threshold])
+            writer.writerow(["use_node_level", getattr(args, 'use_node_level', 'N/A')])
+            writer.writerow(["exclude_time_features", getattr(args, 'exclude_time_features', 'N/A')])
+            writer.writerow(["weather_file", getattr(args, 'weather_file', 'N/A')])
+            writer.writerow(["period_hours", getattr(args, 'period_hours', 'N/A')])
+            writer.writerow(["stage1_epochs", getattr(args, 'stage1_epochs', 'N/A')])
+            writer.writerow(["stage2_epochs", getattr(args, 'stage2_epochs', 'N/A')])
+            writer.writerow(["stage3_epochs", getattr(args, 'stage3_epochs', 'N/A')])
+            writer.writerow(["batch_size", getattr(args, 'batch_size', 'N/A')])
+            writer.writerow(["lr", getattr(args, 'lr', 'N/A')])
+            writer.writerow(["patience", getattr(args, 'patience', 'N/A')])
+            writer.writerow(["dp", getattr(args, 'dp', dp_enabled)])
+            writer.writerow(["dp_accountant", getattr(args, 'dp_accountant', 'N/A')])
+            writer.writerow(["epsilon (target)", f"{float(target_epsilon):.3f}"])
+            writer.writerow(["target_delta", getattr(args, 'target_delta', 'N/A')])
+            writer.writerow(["noise_multiplier", float(noise_multiplier)])
+            writer.writerow(["max_grad_norm", getattr(args, 'max_grad_norm', 'N/A')])
+            writer.writerow(["sample_rate", getattr(args, 'sample_rate', 'N/A')])
+            writer.writerow(["epsilon_tolerance", getattr(args, 'epsilon_tolerance', 'N/A')])
+            writer.writerow(["model_path", getattr(args, 'model_path', 'N/A')])
+            writer.writerow(["checkpoint_dir", getattr(args, 'checkpoint_dir', 'N/A')])
+            writer.writerow(["seed", getattr(args, 'seed', 'N/A')])
+            writer.writerow(["balance_50_50", getattr(args, 'balance_50_50', 'N/A')])
+            writer.writerow(["epsilonfixed", getattr(args, 'epsilonfixed', 'N/A')])
+        else:
+            writer.writerow(["Arguments object not provided"])
+        writer.writerow([])
+        
+        writer.writerow(["=== TRAINING RESULTS ==="])
+        writer.writerow(["Final Epsilon", f"{final_epsilon:.3f}"])
         writer.writerow(["Final Delta", f"{final_delta:.2e}"])
         writer.writerow(["Epsilon Exceeded", summary['epsilon_exceeded']])
         writer.writerow(["Train Samples", train_samples])
@@ -1575,18 +1641,38 @@ def final_evaluation(
     print(f"\n✓ Results saved to:")
     print(f"  - {model_path}")
     print(f"  - {history_csv}")
-    print(f"  - {summary_csv}")
     print(f"  - {results_table_csv}")
+    
+    # Rename checkpoint directory to match model filename
+    if checkpoint_dir and os.path.exists(checkpoint_dir):
+        from pathlib import Path
+        old_dir = Path(checkpoint_dir)
+        # Extract model filename without extension
+        model_basename = os.path.splitext(os.path.basename(model_path))[0]
+        # Create new directory name
+        new_dir = old_dir.parent / model_basename
+        if old_dir != new_dir and not new_dir.exists():
+            try:
+                old_dir.rename(new_dir)
+                print(f"\n✓ Renamed checkpoint directory:")
+                print(f"  From: {old_dir}")
+                print(f"  To: {new_dir}")
+                # Update latest_run.txt
+                latest_file = old_dir.parent / "latest_run.txt"
+                if latest_file.exists():
+                    with open(latest_file, "w", encoding="utf-8") as f:
+                        f.write(str(new_dir))
+            except Exception as e:
+                print(f"\n⚠ Could not rename checkpoint directory: {e}")
     
     # Download files to local device (only in Colab)
     if IN_COLAB and colab_files is not None:
         print("\n[DOWNLOAD] Downloading files to local device...")
         
-        # Files to download: model, history, summary, and checkpoints
+        # Files to download: model, history, results table, and checkpoints
         files_to_download = [
             model_path,
             history_csv,
-            summary_csv,
             results_table_csv,
         ]
         
@@ -1647,29 +1733,21 @@ def parse_args() -> argparse.Namespace:
         choices=[3, 6, 12, 24],
         help='Train/test ONLY this horizon (choose one of 3, 6, 12, 24). Example: --horizons 24',
     )
-    parser.add_argument('--delay_threshold', type=float, default=10.0)
+    parser.add_argument('--delay_threshold', type=float, default=5.0)
     parser.add_argument('--class_threshold', type=float, default=0.5)
     parser.add_argument('--use_node_level', action='store_true', default=True, help='Use node-level labels')
-    parser.add_argument('--exclude_time_features', default=False, action='store_true', help='Exclude time features (hour, day of week) from input')
+    parser.add_argument('--exclude_time_features', default=True, action='store_true', help='Exclude time features (hour, day of week) from input')
     parser.add_argument('--weather_file', type=str, default='weather_cn.npy')
     parser.add_argument('--period_hours', type=int, default=24)
     parser.add_argument('--stage1_epochs', type=int, default=10)
-    parser.add_argument('--stage2_epochs', type=int, default=8)
-    parser.add_argument('--stage3_epochs', type=int, default=12, help='Epochs for non-delayed regressor')
+    parser.add_argument('--stage2_epochs', type=int, default=10)
+    parser.add_argument('--stage3_epochs', type=int, default=20, help='Epochs for non-delayed regressor')
     parser.add_argument('--batch_size', type=int, default=128)
-    parser.add_argument('--lr', type=float, default=0.005)
-    parser.add_argument('--patience', type=int, default=5)
-    parser.add_argument('--dp', default=True, action='store_true', help='Enable DP-SGD')
-    parser.add_argument(
-        '--dp_accountant',
-        type=str,
-        default='rdp',
-        choices=['rdp', 'prv', 'gdp'],
-        help=(
-            "Opacus privacy accountant. 'prv' can be memory-heavy and may crash on large runs; "
-            "'rdp' is usually much lighter."
-        ),
-    )
+    parser.add_argument('--lr', type=float, default=0.001)
+    parser.add_argument('--patience', type=int, default=10)
+    parser.add_argument('--freeze_encoder_stage2', action='store_true', default=False, help='Freeze encoder during Stage 2 (default: trainable)')
+    parser.add_argument('--dp', default=False, action='store_true', help='Enable DP-SGD')
+    parser.add_argument('--dp_accountant',type=str,default='rdp',choices=['rdp', 'prv', 'gdp'],help="Opacus privacy accountant. 'prv' can be memory-heavy and may crash on large runs; 'rdp' is usually much lighter.")    
     parser.add_argument(
         '--epsilon',
         type=float,
@@ -1678,7 +1756,7 @@ def parse_args() -> argparse.Namespace:
     )
     # Backward-compatible alias (do not advertise)
     parser.add_argument('--target_delta', type=float, default=1e-5)
-    parser.add_argument('--noise_multiplier', type=float, default=1, help='Fixed noise multiplier for DP-SGD (lower=less noise, less privacy)')
+    parser.add_argument('--noise_multiplier', type=float, default=0, help='Fixed noise multiplier for DP-SGD (lower=less noise, less privacy)')
     parser.add_argument('--max_grad_norm', type=float, default=2.0, help='Max gradient norm for clipping (higher allows larger gradients)')
     parser.add_argument('--sample_rate', type=float, default=0.02)
     parser.add_argument('--epsilon_tolerance', type=float, default=0.05)
@@ -1699,7 +1777,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--epsilonfixed',
         dest='epsilonfixed',
-        action='store_false',
+        action='store_true',
         help='Enable epsilon-calibrated DP-SGD (uses Opacus make_private_with_epsilon)'
     )
     # Backward-compatible alias (do not advertise)
@@ -2063,6 +2141,7 @@ def main() -> None:
         patience=args.patience,
         target_delta=float(args.target_delta),
         target_epsilon=tracking_target_epsilon,
+        freeze_encoder=args.freeze_encoder_stage2,
     )
 
     # Preserve delayed regressor after Stage 2 (do not swap modules; keep optimizer valid).
@@ -2117,6 +2196,7 @@ def main() -> None:
         timestamp=timestamp,
         suffix="model",
         ext=".pth",
+        epsilon=final_epsilon,
     )
 
     print(f"\nOutput model will be saved to: {args.model_path}")
@@ -2149,6 +2229,9 @@ def main() -> None:
         float(args.epsilon),
         sigma_val,
         artifact_prefix="train",
+        seq_len=args.seq_len,
+        args=args,
+        checkpoint_dir=CHECKPOINT_DIR,
     )
 
 

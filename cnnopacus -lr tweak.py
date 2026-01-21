@@ -524,6 +524,11 @@ def train_stage1_opacus(
 
     _set_optimizer_hparams(optimizer, lr=lr, weight_decay=1e-4)
     cls_loss_fn = FocalLoss(alpha=pos_weight.to(device), gamma=2.0, reduction="mean")
+    
+    # Learning rate scheduler
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='max', factor=0.5, patience=patience//2, min_lr=lr*0.01
+    )
 
     history: List[Dict] = []
     best_f1 = 0.0
@@ -589,12 +594,16 @@ def train_stage1_opacus(
         eps_str = (
             f"ε: {current_epsilon:.3f}/{target_epsilon}" if privacy_engine is not None else "No DP"
         )
+        current_lr = optimizer.param_groups[0]['lr']
         print(
             f"Epoch {epoch}/{epochs} | Loss: {history[-1]['train_loss']:.4f} | "
             f"Val F1 (macro): {val_metrics['f1']:.4f} "
             f"[arr {val_metrics['f1_arrival']:.4f}, dep {val_metrics['f1_departure']:.4f}] | "
-            f"{eps_str} | Steps: {step_count} | Time: {epoch_time:.2f}s"
+            f"{eps_str} | LR: {current_lr:.6f} | Steps: {step_count} | Time: {epoch_time:.2f}s"
         )
+        
+        # Step scheduler
+        scheduler.step(val_metrics['f1'])
 
         if float(val_metrics["f1"]) > best_f1:
             best_f1 = float(val_metrics["f1"])
@@ -632,6 +641,7 @@ def train_stage2_opacus(
     patience: int,
     target_delta: float,
     target_epsilon: float,
+    freeze_encoder: bool = False,
 ) -> Tuple[List[Dict], float]:
     """Stage 2: delayed-flight regressor fine-tuning (Opacus).
 
@@ -644,15 +654,28 @@ def train_stage2_opacus(
 
     base = _unwrap_opacus_model(model)
 
+    # Keep encoder trainable by default for better learning
+    # Only freeze if explicitly requested via freeze_encoder_stage2
     for p in base.encoder.parameters():
-        p.requires_grad = False
+        p.requires_grad = not freeze_encoder
     for p in base.classifier.parameters():
         p.requires_grad = False
     for p in base.regressor.parameters():
         p.requires_grad = True
+    
+    # Reset optimizer momentum for fresh start
+    for group in optimizer.param_groups:
+        for key in ['momentum_buffer', 'exp_avg', 'exp_avg_sq']:
+            if key in group:
+                del group[key]
 
     _set_optimizer_hparams(optimizer, lr=lr, weight_decay=1e-4)
     huber_loss = nn.HuberLoss(reduction="none", delta=2.0)
+    
+    # Learning rate scheduler for Stage 2
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=patience//2,min_lr=lr*0.001
+    )
 
     if scaler is not None and hasattr(scaler, "mean") and hasattr(scaler, "std"):
         mean_t = torch.tensor(np.array(scaler.mean, dtype=np.float32), device=device)
@@ -738,11 +761,15 @@ def train_stage2_opacus(
         eps_str = (
             f"ε: {current_epsilon:.3f}/{target_epsilon}" if privacy_engine is not None else "No DP"
         )
+        current_lr = optimizer.param_groups[0]['lr']
         print(
             f"Epoch {epoch}/{epochs} | Train Loss: {history[-1]['train_loss']:.4f} | "
             f"Val Loss: {val_loss:.4f} | Masked: {masked_ratio*100:.1f}% "
-            f"(val {val_masked_ratio*100:.1f}%) | {eps_str} | Time: {epoch_time:.2f}s"
+            f"(val {val_masked_ratio*100:.1f}%) | {eps_str} | LR: {current_lr:.6f} | Time: {epoch_time:.2f}s"
         )
+        
+        # Step scheduler
+        scheduler.step(val_loss)
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -800,8 +827,13 @@ def train_stage3_opacus(
     for p in base.regressor.parameters():
         p.requires_grad = True
 
-    _set_optimizer_hparams(optimizer, lr=lr * 0.01, weight_decay=1e-5)
+    _set_optimizer_hparams(optimizer, lr=lr*2, weight_decay=1e-5)
     reg_loss_fn = nn.HuberLoss(reduction="none", delta=1.0)
+    
+    # Learning rate scheduler for Stage 3
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=patience//2, min_lr=lr*0.001
+    )
 
     if scaler is not None and hasattr(scaler, "mean") and hasattr(scaler, "std"):
         mean_t = torch.tensor(np.array(scaler.mean, dtype=np.float32), device=device)
@@ -910,12 +942,16 @@ def train_stage3_opacus(
         eps_str = (
             f"ε: {current_epsilon:.3f}/{target_epsilon}" if privacy_engine is not None else "No DP"
         )
+        current_lr = optimizer.param_groups[0]['lr']
         print(
             f"Epoch {epoch}/{epochs} | Loss: {history[-1]['train_loss']:.4f} | "
             f"Val: {val_loss:.4f} | Non-delayed: {total_nondelayed:.0f} "
             f"({nondelayed_ratio*100:.1f}%) | Val ND: {val_nondelayed:.0f} "
-            f"({val_nondelayed_ratio*100:.1f}%) | {eps_str} | Time: {epoch_time:.2f}s"
+            f"({val_nondelayed_ratio*100:.1f}%) | {eps_str} | LR: {current_lr:.6f} | Time: {epoch_time:.2f}s"
         )
+        
+        # Step scheduler
+        scheduler.step(val_loss)
 
         if val_loss < best_val_loss and val_nondelayed > 0:
             best_val_loss = val_loss
@@ -1688,7 +1724,7 @@ def load_checkpoint(model, optimizer, path):
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Three-stage CNN (with optional DP-SGD) with epsilon tracking")
     parser.add_argument('--data_source', type=str, default='cdata', choices=['cdata', 'udata'])
-    parser.add_argument('--seq_len', type=int, default=8)
+    parser.add_argument('--seq_len', type=int, default=48)
     parser.add_argument(
         '--horizons',
         type=int,
@@ -1703,12 +1739,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--exclude_time_features', default=True, action='store_true', help='Exclude time features (hour, day of week) from input')
     parser.add_argument('--weather_file', type=str, default='weather_cn.npy')
     parser.add_argument('--period_hours', type=int, default=24)
-    parser.add_argument('--stage1_epochs', type=int, default=8)
+    parser.add_argument('--stage1_epochs', type=int, default=10)
     parser.add_argument('--stage2_epochs', type=int, default=10)
-    parser.add_argument('--stage3_epochs', type=int, default=14, help='Epochs for non-delayed regressor')
+    parser.add_argument('--stage3_epochs', type=int, default=20, help='Epochs for non-delayed regressor')
     parser.add_argument('--batch_size', type=int, default=128)
-    parser.add_argument('--lr', type=float, default=0.005)
-    parser.add_argument('--patience', type=int, default=5)
+    parser.add_argument('--lr', type=float, default=0.001)
+    parser.add_argument('--patience', type=int, default=10)
+    parser.add_argument('--freeze_encoder_stage2', action='store_true', default=False, help='Freeze encoder during Stage 2 (default: trainable)')
     parser.add_argument('--dp', default=False, action='store_true', help='Enable DP-SGD')
     parser.add_argument('--dp_accountant',type=str,default='rdp',choices=['rdp', 'prv', 'gdp'],help="Opacus privacy accountant. 'prv' can be memory-heavy and may crash on large runs; 'rdp' is usually much lighter.")    
     parser.add_argument(
@@ -2104,6 +2141,7 @@ def main() -> None:
         patience=args.patience,
         target_delta=float(args.target_delta),
         target_epsilon=tracking_target_epsilon,
+        freeze_encoder=args.freeze_encoder_stage2,
     )
 
     # Preserve delayed regressor after Stage 2 (do not swap modules; keep optimizer valid).

@@ -1,0 +1,121 @@
+trial_id,success,elapsed_time_minutes,timestamp,stage1_lr,stage2_lr,stage3_lr,error
+1,False,0.34394758542378745,2026-01-21T14:12:30.007572,0.01,0.01,0.01,"arget_delta TARGET_DELTA]
+                    [--noise_multiplier NOISE_MULTIPLIER]
+                    [--max_grad_norm MAX_GRAD_NORM]
+                    [--sample_rate SAMPLE_RATE]
+                    [--epsilon_tolerance EPSILON_TOLERANCE]
+                    [--model_path MODEL_PATH]
+                    [--checkpoint_dir CHECKPOINT_DIR] [--seed SEED]
+                    [--balance_50_50] [--epsilonfixed] [--no-epsilonfixed]
+cnnopacus.py: error: unrecognized arguments: --hidden_channels 256
+"
+2,False,0.10890816847483317,2026-01-21T14:12:50.644427,0.01,5e-05,5e-05,"arget_delta TARGET_DELTA]
+                    [--noise_multiplier NOISE_MULTIPLIER]
+                    [--max_grad_norm MAX_GRAD_NORM]
+                    [--sample_rate SAMPLE_RATE]
+                    [--epsilon_tolerance EPSILON_TOLERANCE]
+                    [--model_path MODEL_PATH]
+                    [--checkpoint_dir CHECKPOINT_DIR] [--seed SEED]
+                    [--balance_50_50] [--epsilonfixed] [--no-epsilonfixed]
+cnnopacus.py: error: unrecognized arguments: --hidden_channels 256
+"
+3,False,0.09769348700841268,2026-01-21T14:12:57.178918,0.01,0.0001,5e-05,"arget_delta TARGET_DELTA]
+                    [--noise_multiplier NOISE_MULTIPLIER]
+                    [--max_grad_norm MAX_GRAD_NORM]
+                    [--sample_rate SAMPLE_RATE]
+                    [--epsilon_tolerance EPSILON_TOLERANCE]
+                    [--model_path MODEL_PATH]
+                    [--checkpoint_dir CHECKPOINT_DIR] [--seed SEED]
+                    [--balance_50_50] [--epsilonfixed] [--no-epsilonfixed]
+cnnopacus.py: error: unrecognized arguments: --hidden_channels 256
+"
+4,False,0.09868826468785603,2026-01-21T14:13:03.041706,0.01,0.0001,0.0001,"arget_delta TARGET_DELTA]
+                    [--noise_multiplier NOISE_MULTIPLIER]
+                    [--max_grad_norm MAX_GRAD_NORM]
+                    [--sample_rate SAMPLE_RATE]
+                    [--epsilon_tolerance EPSILON_TOLERANCE]
+                    [--model_path MODEL_PATH]
+                    [--checkpoint_dir CHECKPOINT_DIR] [--seed SEED]
+                    [--balance_50_50] [--epsilonfixed] [--no-epsilonfixed]
+cnnopacus.py: error: unrecognized arguments: --hidden_channels 256
+"
+5,False,0.10068562428156534,2026-01-21T14:13:08.963002,0.01,0.0003,5e-05,"arget_delta TARGET_DELTA]
+                    [--noise_multiplier NOISE_MULTIPLIER]
+                    [--max_grad_norm MAX_GRAD_NORM]
+                    [--sample_rate SAMPLE_RATE]
+                    [--epsilon_tolerance EPSILON_TOLERANCE]
+                    [--model_path MODEL_PATH]
+                    [--checkpoint_dir CHECKPOINT_DIR] [--seed SEED]
+                    [--balance_50_50] [--epsilonfixed] [--no-epsilonfixed]
+cnnopacus.py: error: unrecognized arguments: --hidden_channels 256
+"
+6,False,0.10400609572728475,2026-01-21T14:13:15.004939,0.01,0.0003,0.0001,"arget_delta TARGET_DELTA]
+                    [--noise_multiplier NOISE_MULTIPLIER]
+                    [--max_grad_norm MAX_GRAD_NORM]
+                    [--sample_rate SAMPLE_RATE]
+                    [--epsilon_tolerance EPSILON_TOLERANCE]
+                    [--model_path MODEL_PATH]
+                    [--checkpoint_dir CHECKPOINT_DIR] [--seed SEED]
+                    [--balance_50_50] [--epsilonfixed] [--no-epsilonfixed]
+cnnopacus.py: error: unrecognized arguments: --hidden_channels 256
+"
+7,False,0.09420919020970663,2026-01-21T14:13:21.245305,0.01,0.0003,0.0003,"arget_delta TARGET_DELTA]
+                    [--noise_multiplier NOISE_MULTIPLIER]
+                    [--max_grad_norm MAX_GRAD_NORM]
+                    [--sample_rate SAMPLE_RATE]
+                    [--epsilon_tolerance EPSILON_TOLERANCE]
+                    [--model_path MODEL_PATH]
+                    [--checkpoint_dir CHECKPOINT_DIR] [--seed SEED]
+                    [--balance_50_50] [--epsilonfixed] [--no-epsilonfixed]
+cnnopacus.py: error: unrecognized arguments: --hidden_channels 256
+"
+8,False,0.10240722099939982,2026-01-21T14:13:26.897856,0.01,0.0008,5e-05,"arget_delta TARGET_DELTA]
+                    [--noise_multiplier NOISE_MULTIPLIER]
+                    [--max_grad_norm MAX_GRAD_NORM]
+                    [--sample_rate SAMPLE_RATE]
+                    [--epsilon_tolerance EPSILON_TOLERANCE]
+                    [--model_path MODEL_PATH]
+                    [--checkpoint_dir CHECKPOINT_DIR] [--seed SEED]
+                    [--balance_50_50] [--epsilonfixed] [--no-epsilonfixed]
+cnnopacus.py: error: unrecognized arguments: --hidden_channels 256
+"
+9,False,0.1130691925684611,2026-01-21T14:13:33.043345,0.01,0.0008,0.0001,"arget_delta TARGET_DELTA]
+                    [--noise_multiplier NOISE_MULTIPLIER]
+                    [--max_grad_norm MAX_GRAD_NORM]
+                    [--sample_rate SAMPLE_RATE]
+                    [--epsilon_tolerance EPSILON_TOLERANCE]
+                    [--model_path MODEL_PATH]
+                    [--checkpoint_dir CHECKPOINT_DIR] [--seed SEED]
+                    [--balance_50_50] [--epsilonfixed] [--no-epsilonfixed]
+cnnopacus.py: error: unrecognized arguments: --hidden_channels 256
+"
+10,False,0.1043482502301534,2026-01-21T14:13:39.827497,0.01,0.0008,0.0003,"arget_delta TARGET_DELTA]
+                    [--noise_multiplier NOISE_MULTIPLIER]
+                    [--max_grad_norm MAX_GRAD_NORM]
+                    [--sample_rate SAMPLE_RATE]
+                    [--epsilon_tolerance EPSILON_TOLERANCE]
+                    [--model_path MODEL_PATH]
+                    [--checkpoint_dir CHECKPOINT_DIR] [--seed SEED]
+                    [--balance_50_50] [--epsilonfixed] [--no-epsilonfixed]
+cnnopacus.py: error: unrecognized arguments: --hidden_channels 256
+"
+11,False,0.09479764699935914,2026-01-21T14:13:46.088391,0.01,0.0008,0.0008,"arget_delta TARGET_DELTA]
+                    [--noise_multiplier NOISE_MULTIPLIER]
+                    [--max_grad_norm MAX_GRAD_NORM]
+                    [--sample_rate SAMPLE_RATE]
+                    [--epsilon_tolerance EPSILON_TOLERANCE]
+                    [--model_path MODEL_PATH]
+                    [--checkpoint_dir CHECKPOINT_DIR] [--seed SEED]
+                    [--balance_50_50] [--epsilonfixed] [--no-epsilonfixed]
+cnnopacus.py: error: unrecognized arguments: --hidden_channels 256
+"
+12,False,0.10173755884170532,2026-01-21T14:13:51.776250,0.01,0.001,5e-05,"arget_delta TARGET_DELTA]
+                    [--noise_multiplier NOISE_MULTIPLIER]
+                    [--max_grad_norm MAX_GRAD_NORM]
+                    [--sample_rate SAMPLE_RATE]
+                    [--epsilon_tolerance EPSILON_TOLERANCE]
+                    [--model_path MODEL_PATH]
+                    [--checkpoint_dir CHECKPOINT_DIR] [--seed SEED]
+                    [--balance_50_50] [--epsilonfixed] [--no-epsilonfixed]
+cnnopacus.py: error: unrecognized arguments: --hidden_channels 256
+"

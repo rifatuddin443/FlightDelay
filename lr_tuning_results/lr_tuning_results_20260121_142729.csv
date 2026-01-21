@@ -1,0 +1,211 @@
+trial_id,success,elapsed_time_minutes,timestamp,stage1_lr,stage2_lr,stage3_lr,error
+1,False,0.017708667119344077,2026-01-21T14:27:29.543046,0.01,0.01,0.01,"n run_path
+    code, fname = _get_code_from_file(run_name, path_name)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""c:\Users\Lenovo\.vscode\extensions\ms-python.debugpy-2025.18.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py"", line 283, in _get_code_from_file
+    code = compile(f.read(), fname, ""exec"")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""cnnopacus.py"", line 1922
+    in_channels=in_channels,
+IndentationError: unexpected indent
+"
+2,False,0.017842380205790202,2026-01-21T14:27:30.605566,0.01,5e-05,5e-05,"n run_path
+    code, fname = _get_code_from_file(run_name, path_name)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""c:\Users\Lenovo\.vscode\extensions\ms-python.debugpy-2025.18.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py"", line 283, in _get_code_from_file
+    code = compile(f.read(), fname, ""exec"")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""cnnopacus.py"", line 1922
+    in_channels=in_channels,
+IndentationError: unexpected indent
+"
+3,False,0.01876100301742554,2026-01-21T14:27:31.681397,0.01,0.0001,5e-05,"n run_path
+    code, fname = _get_code_from_file(run_name, path_name)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""c:\Users\Lenovo\.vscode\extensions\ms-python.debugpy-2025.18.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py"", line 283, in _get_code_from_file
+    code = compile(f.read(), fname, ""exec"")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""cnnopacus.py"", line 1922
+    in_channels=in_channels,
+IndentationError: unexpected indent
+"
+4,False,0.01736180782318115,2026-01-21T14:27:32.813850,0.01,0.0001,0.0001,"n run_path
+    code, fname = _get_code_from_file(run_name, path_name)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""c:\Users\Lenovo\.vscode\extensions\ms-python.debugpy-2025.18.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py"", line 283, in _get_code_from_file
+    code = compile(f.read(), fname, ""exec"")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""cnnopacus.py"", line 1922
+    in_channels=in_channels,
+IndentationError: unexpected indent
+"
+5,False,0.017198646068573,2026-01-21T14:27:33.871192,0.01,0.0003,5e-05,"n run_path
+    code, fname = _get_code_from_file(run_name, path_name)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""c:\Users\Lenovo\.vscode\extensions\ms-python.debugpy-2025.18.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py"", line 283, in _get_code_from_file
+    code = compile(f.read(), fname, ""exec"")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""cnnopacus.py"", line 1922
+    in_channels=in_channels,
+IndentationError: unexpected indent
+"
+6,False,0.017673349380493163,2026-01-21T14:27:34.903111,0.01,0.0003,0.0001,"n run_path
+    code, fname = _get_code_from_file(run_name, path_name)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""c:\Users\Lenovo\.vscode\extensions\ms-python.debugpy-2025.18.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py"", line 283, in _get_code_from_file
+    code = compile(f.read(), fname, ""exec"")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""cnnopacus.py"", line 1922
+    in_channels=in_channels,
+IndentationError: unexpected indent
+"
+7,False,0.018176400661468507,2026-01-21T14:27:35.966526,0.01,0.0003,0.0003,"n run_path
+    code, fname = _get_code_from_file(run_name, path_name)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""c:\Users\Lenovo\.vscode\extensions\ms-python.debugpy-2025.18.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py"", line 283, in _get_code_from_file
+    code = compile(f.read(), fname, ""exec"")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""cnnopacus.py"", line 1922
+    in_channels=in_channels,
+IndentationError: unexpected indent
+"
+8,False,0.017807904879252115,2026-01-21T14:27:37.058153,0.01,0.0008,5e-05,"n run_path
+    code, fname = _get_code_from_file(run_name, path_name)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""c:\Users\Lenovo\.vscode\extensions\ms-python.debugpy-2025.18.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py"", line 283, in _get_code_from_file
+    code = compile(f.read(), fname, ""exec"")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""cnnopacus.py"", line 1922
+    in_channels=in_channels,
+IndentationError: unexpected indent
+"
+9,False,0.018056948979695637,2026-01-21T14:27:38.127488,0.01,0.0008,0.0001,"n run_path
+    code, fname = _get_code_from_file(run_name, path_name)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""c:\Users\Lenovo\.vscode\extensions\ms-python.debugpy-2025.18.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py"", line 283, in _get_code_from_file
+    code = compile(f.read(), fname, ""exec"")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""cnnopacus.py"", line 1922
+    in_channels=in_channels,
+IndentationError: unexpected indent
+"
+10,False,0.01877287228902181,2026-01-21T14:27:39.215888,0.01,0.0008,0.0003,"n run_path
+    code, fname = _get_code_from_file(run_name, path_name)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""c:\Users\Lenovo\.vscode\extensions\ms-python.debugpy-2025.18.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py"", line 283, in _get_code_from_file
+    code = compile(f.read(), fname, ""exec"")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""cnnopacus.py"", line 1922
+    in_channels=in_channels,
+IndentationError: unexpected indent
+"
+11,False,0.01805029312769572,2026-01-21T14:27:40.342261,0.01,0.0008,0.0008,"n run_path
+    code, fname = _get_code_from_file(run_name, path_name)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""c:\Users\Lenovo\.vscode\extensions\ms-python.debugpy-2025.18.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py"", line 283, in _get_code_from_file
+    code = compile(f.read(), fname, ""exec"")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""cnnopacus.py"", line 1922
+    in_channels=in_channels,
+IndentationError: unexpected indent
+"
+12,False,0.018814122676849364,2026-01-21T14:27:41.427274,0.01,0.001,5e-05,"n run_path
+    code, fname = _get_code_from_file(run_name, path_name)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""c:\Users\Lenovo\.vscode\extensions\ms-python.debugpy-2025.18.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py"", line 283, in _get_code_from_file
+    code = compile(f.read(), fname, ""exec"")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""cnnopacus.py"", line 1922
+    in_channels=in_channels,
+IndentationError: unexpected indent
+"
+13,False,0.017801566918691,2026-01-21T14:27:42.558125,0.01,0.001,0.0001,"n run_path
+    code, fname = _get_code_from_file(run_name, path_name)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""c:\Users\Lenovo\.vscode\extensions\ms-python.debugpy-2025.18.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py"", line 283, in _get_code_from_file
+    code = compile(f.read(), fname, ""exec"")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""cnnopacus.py"", line 1922
+    in_channels=in_channels,
+IndentationError: unexpected indent
+"
+14,False,0.0177152156829834,2026-01-21T14:27:43.632586,0.01,0.001,0.0003,"n run_path
+    code, fname = _get_code_from_file(run_name, path_name)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""c:\Users\Lenovo\.vscode\extensions\ms-python.debugpy-2025.18.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py"", line 283, in _get_code_from_file
+    code = compile(f.read(), fname, ""exec"")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""cnnopacus.py"", line 1922
+    in_channels=in_channels,
+IndentationError: unexpected indent
+"
+15,False,0.017594015598297118,2026-01-21T14:27:44.695499,0.01,0.001,0.0008,"n run_path
+    code, fname = _get_code_from_file(run_name, path_name)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""c:\Users\Lenovo\.vscode\extensions\ms-python.debugpy-2025.18.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py"", line 283, in _get_code_from_file
+    code = compile(f.read(), fname, ""exec"")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""cnnopacus.py"", line 1922
+    in_channels=in_channels,
+IndentationError: unexpected indent
+"
+16,False,0.017594027519226074,2026-01-21T14:27:45.751140,0.01,0.001,0.001,"n run_path
+    code, fname = _get_code_from_file(run_name, path_name)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""c:\Users\Lenovo\.vscode\extensions\ms-python.debugpy-2025.18.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py"", line 283, in _get_code_from_file
+    code = compile(f.read(), fname, ""exec"")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""cnnopacus.py"", line 1922
+    in_channels=in_channels,
+IndentationError: unexpected indent
+"
+17,False,0.018188818295796712,2026-01-21T14:27:46.806781,0.01,0.003,5e-05,"n run_path
+    code, fname = _get_code_from_file(run_name, path_name)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""c:\Users\Lenovo\.vscode\extensions\ms-python.debugpy-2025.18.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py"", line 283, in _get_code_from_file
+    code = compile(f.read(), fname, ""exec"")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""cnnopacus.py"", line 1922
+    in_channels=in_channels,
+IndentationError: unexpected indent
+"
+18,False,0.017687352498372395,2026-01-21T14:27:47.898111,0.01,0.003,0.0001,"n run_path
+    code, fname = _get_code_from_file(run_name, path_name)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""c:\Users\Lenovo\.vscode\extensions\ms-python.debugpy-2025.18.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py"", line 283, in _get_code_from_file
+    code = compile(f.read(), fname, ""exec"")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""cnnopacus.py"", line 1922
+    in_channels=in_channels,
+IndentationError: unexpected indent
+"
+19,False,0.018412760893503823,2026-01-21T14:27:48.959352,0.01,0.003,0.0003,"n run_path
+    code, fname = _get_code_from_file(run_name, path_name)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""c:\Users\Lenovo\.vscode\extensions\ms-python.debugpy-2025.18.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py"", line 283, in _get_code_from_file
+    code = compile(f.read(), fname, ""exec"")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""cnnopacus.py"", line 1922
+    in_channels=in_channels,
+IndentationError: unexpected indent
+"
+20,False,0.017450992266337076,2026-01-21T14:27:50.066078,0.01,0.003,0.0008,"n run_path
+    code, fname = _get_code_from_file(run_name, path_name)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""c:\Users\Lenovo\.vscode\extensions\ms-python.debugpy-2025.18.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py"", line 283, in _get_code_from_file
+    code = compile(f.read(), fname, ""exec"")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""cnnopacus.py"", line 1922
+    in_channels=in_channels,
+IndentationError: unexpected indent
+"
+21,False,0.01795088450113932,2026-01-21T14:27:51.118434,0.01,0.003,0.001,"n run_path
+    code, fname = _get_code_from_file(run_name, path_name)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""c:\Users\Lenovo\.vscode\extensions\ms-python.debugpy-2025.18.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py"", line 283, in _get_code_from_file
+    code = compile(f.read(), fname, ""exec"")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""cnnopacus.py"", line 1922
+    in_channels=in_channels,
+IndentationError: unexpected indent
+"

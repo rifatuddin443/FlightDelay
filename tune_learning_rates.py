@@ -79,9 +79,9 @@ class LearningRateTuner:
         elif self.strategy == 'comprehensive':
             # Wide range - SAME FOR ALL STAGES
             return {
-                'stage1_lr': [0.00005, 0.0001, 0.0003, 0.0005, 0.001, 0.002, 0.003, 0.005, 0.01],
-                'stage2_lr': [0.00005, 0.0001, 0.0003, 0.0005, 0.001, 0.002, 0.003, 0.005, 0.01],
-                'stage3_lr': [0.00005, 0.0001, 0.0003, 0.0005, 0.001, 0.002, 0.003, 0.005, 0.01],
+                'stage1_lr': [0.00005, 0.0001, 0.0003, 0.0008, 0.001, 0.003, 0.005, 0.008, 0.01],
+                'stage2_lr': [0.00005, 0.0001, 0.0003, 0.0008, 0.001, 0.003, 0.005, 0.008, 0.01],
+                'stage3_lr': [0.00005, 0.0001, 0.0003, 0.0008, 0.001, 0.003, 0.005, 0.008, 0.01],
             }
         elif self.strategy == 'coarse':
             # Quick exploration - SAME FOR ALL
@@ -257,13 +257,25 @@ class LearningRateTuner:
         }
         
         try:
-            # Run training
-            process = subprocess.run(
+            # Run training with real-time output streaming
+            import subprocess
+            process = subprocess.Popen(
                 cmd,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
-                timeout=7200,  # 2 hour timeout
+                bufsize=1,
+                universal_newlines=True
             )
+            
+            # Stream output in real-time and collect for parsing
+            output_lines = []
+            for line in process.stdout:
+                print(line, end='')  # Print in real-time
+                output_lines.append(line)
+            
+            process.wait(timeout=7200)  # 2 hour timeout
+            output = ''.join(output_lines)
             
             elapsed_time = time.time() - start_time
             result['elapsed_time_minutes'] = elapsed_time / 60
@@ -271,7 +283,7 @@ class LearningRateTuner:
             if process.returncode == 0:
                 result['success'] = True
                 # Parse metrics from output
-                metrics = self._parse_metrics_from_output(process.stdout)
+                metrics = self._parse_metrics_from_output(output)
                 result.update(metrics)
                 
                 # Calculate LR schedule score (how well did convergence work?)
@@ -286,7 +298,7 @@ class LearningRateTuner:
                 print(f"  Schedule Score: {schedule_score:.4f}")
                 print(f"  Training time: {elapsed_time/60:.2f} min")
             else:
-                result['error'] = process.stderr[-500:]
+                result['error'] = output[-500:] if output else "Unknown error"
                 print(f"\n✗ Trial {trial_id} failed")
                 print(f"  Error: {result['error']}")
         

@@ -593,7 +593,8 @@ def train_stage1_opacus(
             f"Epoch {epoch}/{epochs} | Loss: {history[-1]['train_loss']:.4f} | "
             f"Val F1 (macro): {val_metrics['f1']:.4f} "
             f"[arr {val_metrics['f1_arrival']:.4f}, dep {val_metrics['f1_departure']:.4f}] | "
-            f"{eps_str} | Steps: {step_count} | Time: {epoch_time:.2f}s"
+            f"{eps_str} | Steps: {step_count} | Time: {epoch_time:.2f}s",
+            flush=True
         )
 
         if float(val_metrics["f1"]) > best_f1:
@@ -741,7 +742,8 @@ def train_stage2_opacus(
         print(
             f"Epoch {epoch}/{epochs} | Train Loss: {history[-1]['train_loss']:.4f} | "
             f"Val Loss: {val_loss:.4f} | Masked: {masked_ratio*100:.1f}% "
-            f"(val {val_masked_ratio*100:.1f}%) | {eps_str} | Time: {epoch_time:.2f}s"
+            f"(val {val_masked_ratio*100:.1f}%) | {eps_str} | Time: {epoch_time:.2f}s",
+            flush=True
         )
 
         if val_loss < best_val_loss:
@@ -914,7 +916,8 @@ def train_stage3_opacus(
             f"Epoch {epoch}/{epochs} | Loss: {history[-1]['train_loss']:.4f} | "
             f"Val: {val_loss:.4f} | Non-delayed: {total_nondelayed:.0f} "
             f"({nondelayed_ratio*100:.1f}%) | Val ND: {val_nondelayed:.0f} "
-            f"({val_nondelayed_ratio*100:.1f}%) | {eps_str} | Time: {epoch_time:.2f}s"
+            f"({val_nondelayed_ratio*100:.1f}%) | {eps_str} | Time: {epoch_time:.2f}s",
+            flush=True
         )
 
         if val_loss < best_val_loss and val_nondelayed > 0:
@@ -1707,6 +1710,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--stage2_epochs', type=int, default=10)
     parser.add_argument('--stage3_epochs', type=int, default=14, help='Epochs for non-delayed regressor')
     parser.add_argument('--batch_size', type=int, default=128)
+    parser.add_argument('--hidden_channels', type=int, default=128, help='Number of hidden channels in encoder')
     parser.add_argument('--lr', type=float, default=0.005, help='Global learning rate (used if stage-specific LRs not provided)')
     parser.add_argument('--stage1_lr', type=float, default=None, help='Learning rate for Stage 1 (classifier)')
     parser.add_argument('--stage2_lr', type=float, default=None, help='Learning rate for Stage 2 (delayed regressor)')
@@ -1917,7 +1921,7 @@ def main() -> None:
     model = SequentialTwoStagePredictor(
         in_channels=in_channels,
         out_channels=out_channels,
-        hidden_channels=128,  # Increased from 16 for better capacity
+        hidden_channels=args.hidden_channels,
         regressor_extra_layer=True,
         seq_len=args.seq_len,
     ).to(device)

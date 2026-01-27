@@ -55,13 +55,14 @@ class LearningRateTuner:
             'delay_threshold': 5.0,
             'patience': 10,  # Fixed at 10 for consistent comparison
             'hidden_channels': 256,  # Larger model
-            'stage1_epochs': 25,
-            'stage2_epochs': 25,
-            'stage3_epochs': 25,
+            'stage1_epochs': 20,
+            'stage2_epochs': 20,
+            'stage3_epochs': 20,
             'batch_size': 128,
             'balance_50_50': False,
             'noise_multiplier': 0.0,
             'max_grad_norm': 2.0,
+            'skip_visualization': True,  # Disable visualization during tuning
         }
 
     def get_lr_search_space(self) -> Dict[str, List[float]]:
@@ -264,6 +265,8 @@ class LearningRateTuner:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 bufsize=1,
                 universal_newlines=True
             )
@@ -706,15 +709,18 @@ class LearningRateTuner:
         f.write("OPTIMAL LR RANGES (Top 25% Performers)\n")
         f.write("="*80 + "\n\n")
         
-        top_quartile = sorted(results, key=lambda x: x.get('test_f1', 0), reverse=True)[:len(results)//4]
+        # Ensure at least 1 result in top quartile
+        quartile_size = max(1, len(results) // 4)
+        top_quartile = sorted(results, key=lambda x: x.get('test_f1', 0), reverse=True)[:quartile_size]
         
         s1_lrs = [r['lr_config']['stage1_lr'] for r in top_quartile]
         s2_lrs = [r['lr_config']['stage2_lr'] for r in top_quartile]
         s3_lrs = [r['lr_config']['stage3_lr'] for r in top_quartile]
         
-        f.write(f"Stage 1 LR: [{min(s1_lrs):.6f}, {max(s1_lrs):.6f}] (median: {np.median(s1_lrs):.6f})\n")
-        f.write(f"Stage 2 LR: [{min(s2_lrs):.6f}, {max(s2_lrs):.6f}] (median: {np.median(s2_lrs):.6f})\n")
-        f.write(f"Stage 3 LR: [{min(s3_lrs):.6f}, {max(s3_lrs):.6f}] (median: {np.median(s3_lrs):.6f})\n")
+        if s1_lrs:  # Only write if we have data
+            f.write(f"Stage 1 LR: [{min(s1_lrs):.6f}, {max(s1_lrs):.6f}] (median: {np.median(s1_lrs):.6f})\n")
+            f.write(f"Stage 2 LR: [{min(s2_lrs):.6f}, {max(s2_lrs):.6f}] (median: {np.median(s2_lrs):.6f})\n")
+            f.write(f"Stage 3 LR: [{min(s3_lrs):.6f}, {max(s3_lrs):.6f}] (median: {np.median(s3_lrs):.6f})\n")
 
     def run(self) -> None:
         """Execute learning rate tuning."""
@@ -785,7 +791,7 @@ Examples:
     parser.add_argument(
         '--n_trials',
         type=int,
-        default=50,
+        default=30,
         help='Maximum number of trials to run',
     )
     parser.add_argument(

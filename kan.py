@@ -33,6 +33,9 @@ class KANLinear(torch.nn.Module):
             .expand(in_features, -1)
             .contiguous()
         )
+        # KAN uses a fixed grid tensor which should be saved/restored with the model
+        # but is not trainable. Keep it as a buffer so DP tooling (e.g., Opacus)
+        # does not treat it as a parameter.
         self.register_buffer("grid", grid)
 
         self.base_weight = torch.nn.Parameter(torch.Tensor(out_features, in_features))

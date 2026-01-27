@@ -1,0 +1,20 @@
+{
+  "data_source": "cdata",
+  "seq_len": 24,
+  "horizons": [
+    12
+  ],
+  "delay_threshold": 5.0,
+  "patience": 10,
+  "hidden_channels": 256,
+  "stage1_epochs": 20,
+  "stage2_epochs": 20,
+  "stage3_epochs": 20,
+  "batch_size": 128,
+  "balance_50_50": false,
+  "noise_multiplier": 0.0,
+  "max_grad_norm": 2.0,
+  "stage1_lr": 0.01,
+  "stage2_lr": 0.01,
+  "stage3_lr": 0.01
+}

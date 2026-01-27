@@ -252,6 +252,7 @@ def load_flight_data(
     weather_file: str = 'weather_cn.npy',
     period_hours: int = 24,
     data_source: str = 'cdata',
+    remove_time_features: bool = False,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, StandardScaler, int]:
     if data_source == 'udata':
         od_file = 'od_pair.npy'
@@ -309,32 +310,47 @@ def load_flight_data(
     # Clip to prevent extreme outliers from dominating the model
     weather_scaled = np.clip(weather_scaled, -1.5, 1.5)
 
-    # Temporal embeddings (sin/cos encoding of 24h cycle)
-    time_indices = np.arange(total_steps)
-    radians = 2 * np.pi * ((time_indices % period_hours) / period_hours)
-    time_embed = np.stack([np.sin(radians), np.cos(radians)], axis=-1)
-    time_embed = np.broadcast_to(time_embed, (num_nodes, total_steps, 2))
-
     # Split datasets
     train_delay = delay_scaled[:, :train_end, :]
     val_delay = delay_scaled[:, train_end:val_end, :]
     test_delay = delay_scaled[:, val_end:, :]
 
-    train_inputs = np.concatenate([
-        train_delay,
-        weather_scaled[:, :train_end, :],
-        time_embed[:, :train_end, :],
-    ], axis=2)
-    val_inputs = np.concatenate([
-        val_delay,
-        weather_scaled[:, train_end:val_end, :],
-        time_embed[:, train_end:val_end, :],
-    ], axis=2)
-    test_inputs = np.concatenate([
-        test_delay,
-        weather_scaled[:, val_end:, :],
-        time_embed[:, val_end:, :],
-    ], axis=2)
+    # Prepare time embeddings (optionally excluded)
+    if not remove_time_features:
+        time_indices = np.arange(total_steps)
+        radians = 2 * np.pi * ((time_indices % period_hours) / period_hours)
+        time_embed = np.stack([np.sin(radians), np.cos(radians)], axis=-1)
+        time_embed = np.broadcast_to(time_embed, (num_nodes, total_steps, 2))
+        
+        train_inputs = np.concatenate([
+            train_delay,
+            weather_scaled[:, :train_end, :],
+            time_embed[:, :train_end, :],
+        ], axis=2)
+        val_inputs = np.concatenate([
+            val_delay,
+            weather_scaled[:, train_end:val_end, :],
+            time_embed[:, train_end:val_end, :],
+        ], axis=2)
+        test_inputs = np.concatenate([
+            test_delay,
+            weather_scaled[:, val_end:, :],
+            time_embed[:, val_end:, :],
+        ], axis=2)
+    else:
+        # Exclude time features
+        train_inputs = np.concatenate([
+            train_delay,
+            weather_scaled[:, :train_end, :],
+        ], axis=2)
+        val_inputs = np.concatenate([
+            val_delay,
+            weather_scaled[:, train_end:val_end, :],
+        ], axis=2)
+        test_inputs = np.concatenate([
+            test_delay,
+            weather_scaled[:, val_end:, :],
+        ], axis=2)
 
     return (
         edge_index_adj,

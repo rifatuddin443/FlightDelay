@@ -1,0 +1,2 @@
+trial_id,success,elapsed_time_minutes,timestamp,stage1_lr,stage2_lr,stage3_lr,stage1_best_f1,stage1_best_epoch,stage1_total_epochs,stage1_final_f1,stage1_improvement,stage1_initial_loss,stage1_final_loss,stage1_loss_reduction,stage2_best_loss,stage2_final_loss,stage2_loss_reduction,test_mae_overall,test_rmse_overall,schedule_score,error
+1,True,172.3559645851453,2026-01-23T15:53:00.221569,0.01,0.01,0.01,0.4789,11,20,0.474,0.006899999999999962,0.1941,0.1902,0.003899999999999987,0.1395,0.1474,-0.006599999999999995,5.6046,7.4552,2.0,

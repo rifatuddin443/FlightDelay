@@ -360,12 +360,17 @@ class SequentialTwoStagePredictor(nn.Module):
         if self.seq_len is not None and self.seq_len > 0 and (self.in_channels % self.seq_len == 0):
             self.feature_dim = self.in_channels // self.seq_len
 
+        # DEBUG: Log encoder selection
+        print(f"[SequentialTwoStagePredictor] in_channels={self.in_channels}, seq_len={self.seq_len}, "
+              f"feature_dim={self.feature_dim}")
+
         c1 = max(16, self.hidden_channels // 2)
         c2 = max(16, self.hidden_channels)
 
         # Preferred encoder: TCN-style temporal Conv1d (dilations + residual blocks)
         # If seq_len can't be inferred, fall back to a simple flattened Conv1d.
         if self.feature_dim is not None:
+            print(f"[Encoder] Using TCN encoder (sequence-aware: [N, {self.seq_len}, {self.feature_dim}])")
             tcn = TemporalConvNet(
                 self.feature_dim,
                 [c1, c2, self.hidden_channels],
@@ -379,6 +384,7 @@ class SequentialTwoStagePredictor(nn.Module):
             )
         else:
             # Fallback: Conv1d over flattened history vector.
+            print(f"[Encoder] FALLBACK to plain Conv1d (flat input: [N, 1, {self.in_channels}])")
             self.encoder = nn.Sequential(
                 nn.Conv1d(1, c1, kernel_size=7, padding=3),
                 nn.GELU(),
@@ -422,12 +428,14 @@ class SequentialTwoStagePredictor(nn.Module):
                 return self.encoder(x_t)
 
         # Fallback path: flatten and run 1-channel Conv1d
+        print(f"[_encode_x] Using FALLBACK Conv1d path with input shape {x.shape}")
         if x.dim() == 3:
             x_flat = x.reshape(x.shape[0], -1)
         elif x.dim() == 2:
             x_flat = x
         else:
             x_flat = x.view(x.shape[0], -1)
+        print(f"[_encode_x] Flattened to {x_flat.shape}, adding channel dim -> {x_flat.unsqueeze(1).shape}")
         return self.encoder(x_flat.unsqueeze(1))
 
     def forward_classifier(self, data: Data) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -975,6 +983,7 @@ def final_evaluation(
     seq_len: Optional[int] = None,
     args: Optional[object] = None,
     checkpoint_dir: Optional[str] = None,
+    enable_visualization: bool = True,
 ) -> None:
     """Final evaluation and export with Stage 3 regressor."""
     model = _unwrap_opacus_model(model)  # type: ignore[assignment]
@@ -1235,7 +1244,7 @@ def final_evaluation(
               f"Departure MAE {dep_mae_all:.4f} | RMSE {dep_rmse_all:.4f}")
     
     # Visualize classification results
-    if VISUALIZATION_AVAILABLE:
+    if VISUALIZATION_AVAILABLE and enable_visualization:
         print("\n[VISUALIZATION] Generating classification results plots...")
         try:
             # Keep plotting arrays aligned in length.
@@ -1706,9 +1715,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--exclude_time_features', default=True, action='store_true', help='Exclude time features (hour, day of week) from input')
     parser.add_argument('--weather_file', type=str, default='weather_cn.npy')
     parser.add_argument('--period_hours', type=int, default=24)
-    parser.add_argument('--stage1_epochs', type=int, default=15)
-    parser.add_argument('--stage2_epochs', type=int, default=10)
-    parser.add_argument('--stage3_epochs', type=int, default=14, help='Epochs for non-delayed regressor')
+    parser.add_argument('--stage1_epochs', type=int, default=1)
+    parser.add_argument('--stage2_epochs', type=int, default=1)
+    parser.add_argument('--stage3_epochs', type=int, default=1, help='Epochs for non-delayed regressor')
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--hidden_channels', type=int, default=128, help='Number of hidden channels in encoder')
     parser.add_argument('--lr', type=float, default=0.005, help='Global learning rate (used if stage-specific LRs not provided)')
@@ -1744,9 +1753,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument('--seed', type=int, default=None, help='Random seed (None for random)')
     parser.add_argument('--balance_50_50', action='store_true', default=False, help='Apply random undersampling to achieve 50-50 class balance')
+    parser.add_argument('--skip_visualization', action='store_true', default=False, help='Skip visualization plots during final evaluation')
     parser.add_argument(
         '--epsilonfixed',
         dest='epsilonfixed',
+        default=True,
         action='store_true',
         help='Enable epsilon-calibrated DP-SGD (uses Opacus make_private_with_epsilon)'
     )
@@ -2208,6 +2219,7 @@ def main() -> None:
         seq_len=args.seq_len,
         args=args,
         checkpoint_dir=CHECKPOINT_DIR,
+        enable_visualization=not args.skip_visualization,
     )
 
 

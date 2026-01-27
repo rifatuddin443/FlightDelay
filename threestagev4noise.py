@@ -1584,7 +1584,7 @@ def load_checkpoint(model, optimizer, path):
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Three-stage DP-SGD for KAN-GAT with epsilon budget control")
     parser.add_argument('--data_source', type=str, default='cdata', choices=['cdata', 'udata'])
-    parser.add_argument('--seq_len', type=int, default=8)
+    parser.add_argument('--seq_len', type=int, default=24)
     parser.add_argument(
         '--horizons',
         type=int,
@@ -1596,6 +1596,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--delay_threshold', type=float, default=5.0)
     parser.add_argument('--class_threshold', type=float, default=0.5)
     parser.add_argument('--use_node_level', action='store_true', default=True, help='Use node-level labels')
+    parser.add_argument('--remove_time_features', action='store_true', default=True, help='Remove time-related features from input data')
     parser.add_argument('--weather_file', type=str, default='weather_cn.npy')
     parser.add_argument('--period_hours', type=int, default=24)
     parser.add_argument('--stage1_epochs', type=int, default=10)
@@ -1607,7 +1608,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--dp', default=True, action='store_true', help='Enable DP-SGD')
     parser.add_argument('--target_epsilon', type=float, default=15.0, help='Target epsilon for tracking (not used for computing noise)')
     parser.add_argument('--target_delta', type=float, default=1e-5)
-    parser.add_argument('--noise_multiplier', type=float, default=2, help='Fixed noise multiplier for DP-SGD (lower=less noise, less privacy)')
+    parser.add_argument('--noise_multiplier', type=float, default=5, help='Fixed noise multiplier for DP-SGD (lower=less noise, less privacy)')
     parser.add_argument('--max_grad_norm', type=float, default=2.0, help='Max gradient norm for clipping (higher allows larger gradients)')
     parser.add_argument('--sample_rate', type=float, default=0.02)
     parser.add_argument('--epsilon_tolerance', type=float, default=0.05)
@@ -1615,7 +1616,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--checkpoint_dir',
         type=str,
-        default='latest',
+        default='auto',
         help=(
             "Where to save/load stage checkpoints. "
             "Use 'auto' to create a new per-run subfolder under ./checkpoints, "
@@ -1654,6 +1655,7 @@ def main() -> None:
         weather_file=args.weather_file,
         period_hours=args.period_hours,
         data_source=args.data_source,
+        remove_time_features=args.remove_time_features,
     )
     
     horizons = sorted({h for h in args.horizons if h > 0})

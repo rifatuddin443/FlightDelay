@@ -53,7 +53,10 @@ class gcn(nn.Module):
 class learnEmbedding(nn.Module):
     def __init__(self, d_model):
         super(learnEmbedding, self).__init__()
-        self.factor = nn.parameter.Parameter(torch.randn(1,), requires_grad=True)
+        # NOTE: keep this as a buffer (non-trainable) for Opacus compatibility.
+        # Opacus' hooks-based grad sampling does not provide per-sample gradients for
+        # arbitrary standalone Parameters inside custom modules.
+        self.register_buffer("factor", torch.randn(1,))
         self.d_model = d_model  # d=frequency
     
     def forward(self, x):
@@ -61,7 +64,7 @@ class learnEmbedding(nn.Module):
         device = x.device
         dtype = x.dtype
         div = torch.arange(0, self.d_model, 2, device=device, dtype=dtype)
-        div_term = torch.exp(div * self.factor.to(device))
+        div_term = torch.exp(div * self.factor.to(device=device, dtype=dtype))
         
         if len(x.shape) == 2:
             v1 = torch.sin(torch.einsum('bt, f->btf', x, div_term))

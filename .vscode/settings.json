@@ -1,0 +1,9 @@
+{
+    "chat.mcp.serverSampling": {
+        "STPN-main/.vscode/mcp.json: perplexity": {
+            "allowedModels": [
+                "copilot/auto"
+            ]
+        }
+    }
+}

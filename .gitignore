@@ -1,0 +1,11 @@
+# Secrets / local tooling
+.vscode/mcp.json
+.vscode/mcp.*.json
+
+# Python caches
+__pycache__/
+*.pyc
+
+# Common env files
+.env
+.env.*

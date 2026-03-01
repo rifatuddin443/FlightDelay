@@ -1141,6 +1141,8 @@ def final_evaluation(
     
     logits_list, reg_list = [], []
     targets_cls_list, targets_reg_list = [], []
+    # Diagnostics: keep per-head outputs to disentangle routing vs head quality.
+    delayed_head_list, nondelayed_head_list = [], []
     
     USE_FAST_EVAL = False
     
@@ -1167,6 +1169,9 @@ def final_evaluation(
                 # class_threshold is treated as the midpoint (gate=0.5 when prob==threshold).
                 gate = torch.sigmoid((probs - class_threshold) * 10.0)
                 node_reg = reg_delayed * gate + reg_nondelayed * (1.0 - gate)
+
+                delayed_head_list.append(reg_delayed.cpu().numpy())
+                nondelayed_head_list.append(reg_nondelayed.cpu().numpy())
             else:
                 node_reg = model.forward_regressor(hidden, which="delayed")
 
@@ -1182,6 +1187,11 @@ def final_evaluation(
     test_reg_preds = np.concatenate(reg_list, axis=0)
     test_cls_targets = np.concatenate(targets_cls_list, axis=0)
     test_reg_targets = np.concatenate(targets_reg_list, axis=0)
+
+    has_dual_heads = (len(delayed_head_list) == len(reg_list)) and (len(nondelayed_head_list) == len(reg_list))
+    if has_dual_heads:
+        test_reg_delayed = np.concatenate(delayed_head_list, axis=0)
+        test_reg_nondelayed = np.concatenate(nondelayed_head_list, axis=0)
     
     # Classification metrics (arrival/departure separately + macro)
     test_cls_metrics = classification_metrics_per_channel(
@@ -1216,10 +1226,22 @@ def final_evaluation(
     else:
         preds_denorm = gated_preds
         targets_denorm = test_reg_targets
+
+    # Denormalize each head too (so diagnostics match reported units).
+    if has_dual_heads:
+        if scaler is not None:
+            delayed_denorm = scaler.inverse_transform(test_reg_delayed)
+            nondelayed_denorm = scaler.inverse_transform(test_reg_nondelayed)
+        else:
+            delayed_denorm = test_reg_delayed
+            nondelayed_denorm = test_reg_nondelayed
     
     # Treat negative values as on time (0 min)
     preds_denorm = np.maximum(0, preds_denorm)
     targets_denorm = np.maximum(0, targets_denorm)
+    if has_dual_heads:
+        delayed_denorm = np.maximum(0, delayed_denorm)
+        nondelayed_denorm = np.maximum(0, nondelayed_denorm)
     
     # Flatten both predictions and targets consistently for element-wise evaluation
     preds_flat = preds_denorm.flatten()
@@ -1244,6 +1266,16 @@ def final_evaluation(
         rmse_nondelayed = np.sqrt(np.mean((nondelayed_preds - nondelayed_targets) ** 2))
     else:
         mae_nondelayed, rmse_nondelayed = 0.0, 0.0
+
+    # Diagnostics: compute what non-delayed MAE would be if we used each head alone
+    # on the *same* true non-delayed subset.
+    mae_nd_head_only = None
+    mae_nd_delayed_head_only = None
+    if has_dual_heads and nondelayed_mask.sum() > 0:
+        delayed_flat = delayed_denorm.flatten()
+        nondelayed_flat = nondelayed_denorm.flatten()
+        mae_nd_head_only = float(np.mean(np.abs(nondelayed_flat[nondelayed_mask] - nondelayed_targets)))
+        mae_nd_delayed_head_only = float(np.mean(np.abs(delayed_flat[nondelayed_mask] - nondelayed_targets)))
     
     # Overall metrics
     mae_overall = np.mean(np.abs(preds_denorm - targets_denorm))
@@ -1271,6 +1303,10 @@ def final_evaluation(
     print(f"\nREGRESSION (non-delayed flights <= {delay_threshold} min):")
     print(f"  MAE: {mae_nondelayed:.4f} min | RMSE: {rmse_nondelayed:.4f} min")
     print(f"  Number of non-delayed samples: {nondelayed_mask.sum()}")
+    if mae_nd_head_only is not None and mae_nd_delayed_head_only is not None:
+        print("  [Diagnostics] True non-delayed MAE using each head (no gating):")
+        print(f"    Non-delayed head only MAE: {mae_nd_head_only:.4f} min")
+        print(f"    Delayed head only MAE:     {mae_nd_delayed_head_only:.4f} min")
     
     print("\nREGRESSION (overall):")
     print(f"  MAE: {mae_overall:.4f} min | RMSE: {rmse_overall:.4f} min")

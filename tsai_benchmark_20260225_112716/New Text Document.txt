@@ -1,0 +1,600 @@
+
+
+=================================================================
+  tsai Classification Benchmark  |  device=cpu
+  43 models registered
+=================================================================
+
+[1/4] Loading data …
+[2/4] Building sequences …
+
+Node-level balance: 23.33% delayed
+
+Node-level balance: 17.16% delayed
+
+Node-level balance: 24.22% delayed
+  Train (959850, 3, 18)  Val (135850, 3, 18)  Test (273200, 3, 18)
+  c_in=3  c_out=2  seq_len=18
+
+[3/4] Training 43 model(s) …
+
+
+────────────────────────────────────────────────────────────
+  [1/43] FCN
+────────────────────────────────────────────────────────────
+  params: 266,114
+    epoch   5/20  loss=0.7210  val_f1=0.4612
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4643 at epoch 3
+    early stop @ epoch 9  best_val_f1=0.4643
+
+  ✓  F1=0.5874  Acc=0.7191  |  F1_arr=0.6012  F1_dep=0.5736  (1672.3s)
+
+────────────────────────────────────────────────────────────
+  [2/43] FCNPlus
+────────────────────────────────────────────────────────────
+  params: 266,114
+    epoch   5/20  loss=0.7195  val_f1=0.4621
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4685 at epoch 2
+    early stop @ epoch 8  best_val_f1=0.4685
+
+  ✓  F1=0.5916  Acc=0.7298  |  F1_arr=0.6032  F1_dep=0.5801  (1442.5s)
+
+────────────────────────────────────────────────────────────
+  [3/43] ResNet
+────────────────────────────────────────────────────────────
+  params: 479,490
+    epoch   5/20  loss=0.6869  val_f1=0.4611
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4688 at epoch 2
+    early stop @ epoch 8  best_val_f1=0.4688
+
+  ✓  F1=0.5901  Acc=0.7175  |  F1_arr=0.6044  F1_dep=0.5758  (2911.3s)
+
+────────────────────────────────────────────────────────────
+  [4/43] ResNetPlus
+────────────────────────────────────────────────────────────
+  params: 479,490
+    epoch   5/20  loss=0.6867  val_f1=0.4625
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4708 at epoch 2
+    early stop @ epoch 8  best_val_f1=0.4708
+
+  ✓  F1=0.5885  Acc=0.7192  |  F1_arr=0.6002  F1_dep=0.5768  (2918.0s)
+
+────────────────────────────────────────────────────────────
+  [5/43] ResCNN
+────────────────────────────────────────────────────────────
+  params: 257,283
+    epoch   5/20  loss=0.7137  val_f1=0.4654
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4695 at epoch 1
+    early stop @ epoch 7  best_val_f1=0.4695
+
+  ✓  F1=0.5901  Acc=0.7427  |  F1_arr=0.5979  F1_dep=0.5822  (1969.0s)
+
+────────────────────────────────────────────────────────────
+  [6/43] OmniScaleCNN
+────────────────────────────────────────────────────────────
+  params: 1,279,403
+    epoch   5/20  loss=0.7381  val_f1=0.4676
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4694 at epoch 1
+    early stop @ epoch 7  best_val_f1=0.4694
+
+  ✓  F1=0.5887  Acc=0.7346  |  F1_arr=0.5954  F1_dep=0.5820  (9927.5s)
+
+────────────────────────────────────────────────────────────
+  [7/43] XceptionTime
+────────────────────────────────────────────────────────────
+  params: 399,540
+    epoch   5/20  loss=0.9198  val_f1=0.2926
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.2926 at epoch 1
+    early stop @ epoch 7  best_val_f1=0.2926
+
+  ✓  F1=0.3894  Acc=0.2422  |  F1_arr=0.4179  F1_dep=0.3609  (8136.7s)
+
+────────────────────────────────────────────────────────────
+  [8/43] XceptionTimePlus
+────────────────────────────────────────────────────────────
+  params: 399,540
+    epoch   5/20  loss=0.9200  val_f1=0.2926
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.2926 at epoch 1
+    early stop @ epoch 7  best_val_f1=0.2926
+
+  ✓  F1=0.3894  Acc=0.2422  |  F1_arr=0.4179  F1_dep=0.3609  (8005.4s)
+
+────────────────────────────────────────────────────────────
+  [9/43] XResNet1d
+────────────────────────────────────────────────────────────
+  params: 7,228,450
+    epoch   5/20  loss=0.7183  val_f1=0.4692
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4724 at epoch 3
+    early stop @ epoch 9  best_val_f1=0.4724
+
+  ✓  F1=0.5897  Acc=0.7224  |  F1_arr=0.6007  F1_dep=0.5788  (9223.9s)
+
+────────────────────────────────────────────────────────────
+  [10/43] XResNet1dPlus
+────────────────────────────────────────────────────────────
+  params: 7,228,450
+    epoch   5/20  loss=0.7192  val_f1=0.4702
+    epoch  10/20  loss=0.6909  val_f1=0.4683
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4730 at epoch 4
+    early stop @ epoch 10  best_val_f1=0.4730
+
+  ✓  F1=0.5933  Acc=0.7257  |  F1_arr=0.6036  F1_dep=0.5829  (10136.5s)
+
+────────────────────────────────────────────────────────────
+  [11/43] InceptionTime
+────────────────────────────────────────────────────────────
+  params: 455,490
+    epoch   5/20  loss=0.6953  val_f1=0.4701
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4751 at epoch 1
+    early stop @ epoch 7  best_val_f1=0.4751
+
+  ✓  F1=0.5915  Acc=0.7204  |  F1_arr=0.5998  F1_dep=0.5833  (5212.8s)
+
+────────────────────────────────────────────────────────────
+  [12/43] InceptionTimePlus
+────────────────────────────────────────────────────────────
+  params: 455,490
+    epoch   5/20  loss=0.6984  val_f1=0.4696
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4734 at epoch 2
+    early stop @ epoch 8  best_val_f1=0.4734
+
+  ✓  F1=0.5920  Acc=0.7224  |  F1_arr=0.6018  F1_dep=0.5822  (5992.6s)
+
+────────────────────────────────────────────────────────────
+  [13/43] LSTM
+────────────────────────────────────────────────────────────
+  params: 42,202
+    epoch   5/20  loss=0.7183  val_f1=0.4742
+    epoch  10/20  loss=0.6980  val_f1=0.4739
+    epoch  15/20  loss=0.6827  val_f1=0.4701
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4757 at epoch 9
+    early stop @ epoch 15  best_val_f1=0.4757
+
+  ✓  F1=0.5921  Acc=0.7280  |  F1_arr=0.6004  F1_dep=0.5838  (1105.0s)
+
+────────────────────────────────────────────────────────────
+  [14/43] GRU
+────────────────────────────────────────────────────────────
+  params: 31,702
+    epoch   5/20  loss=0.7193  val_f1=0.4728
+    epoch  10/20  loss=0.7017  val_f1=0.4722
+    epoch  15/20  loss=0.6893  val_f1=0.4698
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4741 at epoch 9
+    early stop @ epoch 15  best_val_f1=0.4741
+
+  ✓  F1=0.5949  Acc=0.7326  |  F1_arr=0.6038  F1_dep=0.5861  (1762.3s)
+
+────────────────────────────────────────────────────────────
+  [15/43] RNN
+────────────────────────────────────────────────────────────
+  params: 10,702
+    epoch   5/20  loss=0.7388  val_f1=0.4657
+    epoch  10/20  loss=0.7267  val_f1=0.4679
+    epoch  15/20  loss=0.7167  val_f1=0.4713
+    epoch  20/20  loss=0.7112  val_f1=0.4716
+
+  ✓  F1=0.5915  Acc=0.7276  |  F1_arr=0.6018  F1_dep=0.5812  (1092.8s)
+
+────────────────────────────────────────────────────────────
+  [16/43] LSTMPlus
+────────────────────────────────────────────────────────────
+  params: 42,202
+    epoch   5/20  loss=0.7176  val_f1=0.4764
+    epoch  10/20  loss=0.6976  val_f1=0.4746
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4764 at epoch 5
+    early stop @ epoch 11  best_val_f1=0.4764
+
+  ✓  F1=0.5936  Acc=0.7277  |  F1_arr=0.6030  F1_dep=0.5842  (840.6s)
+
+────────────────────────────────────────────────────────────
+  [17/43] GRUPlus
+────────────────────────────────────────────────────────────
+  params: 31,702
+    epoch   5/20  loss=0.7198  val_f1=0.4730
+    epoch  10/20  loss=0.7023  val_f1=0.4698
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4744 at epoch 4
+    early stop @ epoch 10  best_val_f1=0.4744
+
+  ✓  F1=0.5902  Acc=0.7190  |  F1_arr=0.5991  F1_dep=0.5812  (1221.0s)
+
+────────────────────────────────────────────────────────────
+  [18/43] RNNPlus
+────────────────────────────────────────────────────────────
+  params: 10,702
+    epoch   5/20  loss=0.7401  val_f1=0.4654
+    epoch  10/20  loss=0.7274  val_f1=0.4694
+    epoch  15/20  loss=0.7166  val_f1=0.4701
+    epoch  20/20  loss=0.7109  val_f1=0.4705
+
+  ✓  F1=0.5900  Acc=0.7222  |  F1_arr=0.6000  F1_dep=0.5800  (1190.8s)
+
+────────────────────────────────────────────────────────────
+  [19/43] LSTMAttention
+────────────────────────────────────────────────────────────
+  params: 468,610
+    epoch   5/20  loss=0.7383  val_f1=0.4670
+    epoch  10/20  loss=0.7213  val_f1=0.4751
+    epoch  15/20  loss=0.7041  val_f1=0.4724
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4753 at epoch 9
+    early stop @ epoch 15  best_val_f1=0.4753
+
+  ✓  F1=0.5932  Acc=0.7231  |  F1_arr=0.6025  F1_dep=0.5840  (14947.1s)
+
+────────────────────────────────────────────────────────────
+  [20/43] GRUAttention
+────────────────────────────────────────────────────────────
+  params: 451,586
+    epoch   5/20  loss=0.7366  val_f1=0.4694
+    epoch  10/20  loss=0.7202  val_f1=0.4708
+    epoch  15/20  loss=0.7031  val_f1=0.4729
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4745 at epoch 13
+    early stop @ epoch 19  best_val_f1=0.4745
+
+  ✓  F1=0.5955  Acc=0.7326  |  F1_arr=0.6043  F1_dep=0.5868  (19215.3s)
+
+────────────────────────────────────────────────────────────
+  [21/43] LSTMAttentionPlus
+────────────────────────────────────────────────────────────
+  params: 468,610
+    epoch   5/20  loss=0.7367  val_f1=0.4706
+    epoch  10/20  loss=0.7192  val_f1=0.4732
+    epoch  15/20  loss=0.7024  val_f1=0.4723
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4768 at epoch 12
+    early stop @ epoch 18  best_val_f1=0.4768
+
+  ✓  F1=0.5951  Acc=0.7326  |  F1_arr=0.6057  F1_dep=0.5845  (16844.5s)
+
+────────────────────────────────────────────────────────────
+  [22/43] GRUAttentionPlus
+────────────────────────────────────────────────────────────
+  params: 451,586
+    epoch   5/20  loss=0.7369  val_f1=0.4752
+    epoch  10/20  loss=0.7187  val_f1=0.4750
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4761 at epoch 6
+    early stop @ epoch 12  best_val_f1=0.4761
+
+  ✓  F1=0.5919  Acc=0.7289  |  F1_arr=0.5999  F1_dep=0.5839  (12112.7s)
+
+────────────────────────────────────────────────────────────
+  [23/43] LSTM_FCN
+────────────────────────────────────────────────────────────
+  params: 314,314
+    epoch   5/20  loss=0.7203  val_f1=0.4642
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4690 at epoch 2
+    early stop @ epoch 8  best_val_f1=0.4690
+
+  ✓  F1=0.5881  Acc=0.7213  |  F1_arr=0.5998  F1_dep=0.5765  (1546.4s)
+
+────────────────────────────────────────────────────────────
+  [24/43] GRU_FCN
+────────────────────────────────────────────────────────────
+  params: 302,314
+    epoch   5/20  loss=0.7212  val_f1=0.4617
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4643 at epoch 3
+    early stop @ epoch 9  best_val_f1=0.4643
+
+  ✓  F1=0.5862  Acc=0.7122  |  F1_arr=0.5992  F1_dep=0.5732  (1759.8s)
+
+────────────────────────────────────────────────────────────
+  [25/43] MLSTM_FCN
+────────────────────────────────────────────────────────────
+  params: 324,554
+    epoch   5/20  loss=0.7090  val_f1=0.4669
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4694 at epoch 3
+    early stop @ epoch 9  best_val_f1=0.4694
+
+  ✓  F1=0.5894  Acc=0.7223  |  F1_arr=0.6016  F1_dep=0.5772  (2029.2s)
+
+────────────────────────────────────────────────────────────
+  [26/43] MGRU_FCN
+────────────────────────────────────────────────────────────
+  params: 312,554
+    epoch   5/20  loss=0.7104  val_f1=0.4639
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4702 at epoch 3
+    early stop @ epoch 9  best_val_f1=0.4702
+
+  ✓  F1=0.5892  Acc=0.7290  |  F1_arr=0.5993  F1_dep=0.5791  (2041.3s)
+
+────────────────────────────────────────────────────────────
+  [27/43] LSTM_FCNPlus
+────────────────────────────────────────────────────────────
+  params: 314,314
+    epoch   5/20  loss=0.7206  val_f1=0.4590
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4651 at epoch 1
+    early stop @ epoch 7  best_val_f1=0.4651
+
+  ✓  F1=0.5873  Acc=0.7185  |  F1_arr=0.5944  F1_dep=0.5801  (1362.3s)
+
+────────────────────────────────────────────────────────────
+  [28/43] GRU_FCNPlus
+────────────────────────────────────────────────────────────
+  params: 302,314
+    epoch   5/20  loss=0.7200  val_f1=0.4656
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4673 at epoch 3
+    early stop @ epoch 9  best_val_f1=0.4673
+
+  ✓  F1=0.5870  Acc=0.7281  |  F1_arr=0.5967  F1_dep=0.5774  (1757.4s)
+
+────────────────────────────────────────────────────────────
+  [29/43] MLSTM_FCNPlus
+────────────────────────────────────────────────────────────
+  params: 324,554
+    epoch   5/20  loss=0.7103  val_f1=0.4658
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4682 at epoch 3
+    early stop @ epoch 9  best_val_f1=0.4682
+
+  ✓  F1=0.5930  Acc=0.7300  |  F1_arr=0.6026  F1_dep=0.5834  (2031.6s)
+
+────────────────────────────────────────────────────────────
+  [30/43] TCN
+────────────────────────────────────────────────────────────
+  params: 67,102
+    epoch   5/20  loss=0.7285  val_f1=0.4733
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4742 at epoch 3
+    early stop @ epoch 9  best_val_f1=0.4742
+
+  ✓  F1=0.5935  Acc=0.7354  |  F1_arr=0.6035  F1_dep=0.5834  (8693.9s)
+
+────────────────────────────────────────────────────────────
+  [31/43] MLP
+────────────────────────────────────────────────────────────
+  params: 529,502
+    epoch   5/20  loss=0.7546  val_f1=0.4669
+    epoch  10/20  loss=0.7418  val_f1=0.4695
+    epoch  15/20  loss=0.7317  val_f1=0.4705
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4714 at epoch 13
+    early stop @ epoch 19  best_val_f1=0.4714
+
+  ✓  F1=0.5932  Acc=0.7275  |  F1_arr=0.6040  F1_dep=0.5824  (1385.5s)
+
+────────────────────────────────────────────────────────────
+  [32/43] gMLP
+────────────────────────────────────────────────────────────
+  params: 2,379,782
+    epoch   5/20  loss=0.7131  val_f1=0.4704
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4770 at epoch 3
+    early stop @ epoch 9  best_val_f1=0.4770
+
+  ✓  F1=0.5974  Acc=0.7367  |  F1_arr=0.6069  F1_dep=0.5879  (14876.7s)
+
+────────────────────────────────────────────────────────────
+  [33/43] mWDN
+────────────────────────────────────────────────────────────
+  params: 456,394
+    epoch   5/20  loss=0.7194  val_f1=0.4700
+    epoch  10/20  loss=0.6830  val_f1=0.4675
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4729 at epoch 4
+    early stop @ epoch 10  best_val_f1=0.4729
+
+  ✓  F1=0.5937  Acc=0.7288  |  F1_arr=0.6032  F1_dep=0.5841  (7589.5s)
+
+────────────────────────────────────────────────────────────
+  [34/43] TST
+────────────────────────────────────────────────────────────
+  params: 403,330
+    epoch   5/20  loss=0.7517  val_f1=0.4690
+    epoch  10/20  loss=0.7407  val_f1=0.4634
+    epoch  15/20  loss=0.7325  val_f1=0.4722
+    epoch  20/20  loss=0.7280  val_f1=0.4718
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4726 at epoch 14
+    early stop @ epoch 20  best_val_f1=0.4726
+
+  ✓  F1=0.5907  Acc=0.7195  |  F1_arr=0.6011  F1_dep=0.5804  (19663.3s)
+
+────────────────────────────────────────────────────────────
+  [35/43] TSTPlus
+────────────────────────────────────────────────────────────
+  params: 404,866
+    epoch   5/20  loss=0.7482  val_f1=0.4642
+    epoch  10/20  loss=0.7382  val_f1=0.4728
+    epoch  15/20  loss=0.7287  val_f1=0.4705
+    epoch  20/20  loss=0.7223  val_f1=0.4735
+
+  ✓  F1=0.5919  Acc=0.7230  |  F1_arr=0.6044  F1_dep=0.5795  (13706.1s)
+
+────────────────────────────────────────────────────────────
+  [36/43] TransformerModel
+────────────────────────────────────────────────────────────
+  params: 33,986
+    epoch   5/20  loss=0.7818  val_f1=0.4538
+    epoch  10/20  loss=0.7728  val_f1=0.4563
+    epoch  15/20  loss=0.7659  val_f1=0.4584
+    epoch  20/20  loss=0.7617  val_f1=0.4577
+
+  ✓  F1=0.5829  Acc=0.7301  |  F1_arr=0.5964  F1_dep=0.5694  (2931.1s)
+
+────────────────────────────────────────────────────────────
+  [37/43] PatchTST
+────────────────────────────────────────────────────────────
+  [wrap] PatchTST output (2, 3, 18) → adding head(54→2)
+  params: 6,333,170
+    epoch   5/20  loss=0.8743  val_f1=0.4184
+    epoch  10/20  loss=0.8505  val_f1=0.4276
+    epoch  15/20  loss=0.8346  val_f1=0.4331
+    epoch  20/20  loss=0.8262  val_f1=0.4383
+
+  ✓  F1=0.5627  Acc=0.7145  |  F1_arr=0.5760  F1_dep=0.5493  (38981.9s)
+
+────────────────────────────────────────────────────────────
+  [38/43] TSiTPlus
+────────────────────────────────────────────────────────────
+  params: 600,962
+    epoch   5/20  loss=0.7325  val_f1=0.4755
+    epoch  10/20  loss=0.7167  val_f1=0.4751
+    epoch  15/20  loss=0.6937  val_f1=0.4753
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4788 at epoch 11
+    early stop @ epoch 17  best_val_f1=0.4788
+
+  ✓  F1=0.5986  Acc=0.7348  |  F1_arr=0.6061  F1_dep=0.5912  (14461.2s)
+
+────────────────────────────────────────────────────────────
+  [39/43] TSSequencerPlus
+────────────────────────────────────────────────────────────
+  params: 241,502
+    epoch   5/20  loss=0.7168  val_f1=0.4771
+    epoch  10/20  loss=0.6935  val_f1=0.4733
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4771 at epoch 5
+    early stop @ epoch 11  best_val_f1=0.4771
+
+  ✓  F1=0.5981  Acc=0.7417  |  F1_arr=0.6061  F1_dep=0.5902  (24137.4s)
+
+────────────────────────────────────────────────────────────
+  [40/43] ConvTranPlus
+────────────────────────────────────────────────────────────
+  params: 13,402
+    epoch   5/20  loss=0.7321  val_f1=0.4712
+    epoch  10/20  loss=0.7239  val_f1=0.4726
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4740 at epoch 4
+    early stop @ epoch 10  best_val_f1=0.4740
+
+  ✓  F1=0.5948  Acc=0.7433  |  F1_arr=0.6020  F1_dep=0.5877  (1841.1s)
+
+────────────────────────────────────────────────────────────
+  [41/43] XCM
+────────────────────────────────────────────────────────────
+  params: 20,100
+    epoch   5/20  loss=0.7340  val_f1=0.4692
+    epoch  10/20  loss=0.7226  val_f1=0.4722
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4725 at epoch 4
+    early stop @ epoch 10  best_val_f1=0.4725
+
+  ✓  F1=0.5928  Acc=0.7283  |  F1_arr=0.6039  F1_dep=0.5817  (1202.6s)
+
+────────────────────────────────────────────────────────────
+  [42/43] XCMPlus
+────────────────────────────────────────────────────────────
+  params: 20,100
+    epoch   5/20  loss=0.7357  val_f1=0.4684
+    epoch  10/20  loss=0.7242  val_f1=0.4677
+
+⏹️  Early stopping triggered! No improvement for 6 epochs.
+   Best score: 0.4732 at epoch 7
+    early stop @ epoch 13  best_val_f1=0.4732
+
+  ✓  F1=0.5905  Acc=0.7232  |  F1_arr=0.6019  F1_dep=0.5791  (1559.5s)
+
+────────────────────────────────────────────────────────────
+  [43/43] MiniRocketPlus
+────────────────────────────────────────────────────────────
+  params: 39,986
+    epoch   5/20  loss=0.8031  val_f1=0.4512
+    epoch  10/20  loss=0.7961  val_f1=0.4542
+    epoch  15/20  loss=0.7905  val_f1=0.4555
+    epoch  20/20  loss=0.7872  val_f1=0.4556
+
+  ✓  F1=0.5783  Acc=0.7254  |  F1_arr=0.5883  F1_dep=0.5683  (3730.8s)
+
+============================================================
+[4/4] Writing summary → tsai_benchmark_20260225_112716
+============================================================
+
+Rank  Model                    F1     Acc    Prec     Rec   F1_arr   F1_dep      Params     sec
+───────────────────────────────────────────────────────────────────────────────────────────────
+1     TSiTPlus             0.5986  0.7348  0.4719  0.8187   0.6061   0.5912     600,962  14461.2
+2     TSSequencerPlus      0.5981  0.7417  0.4793  0.7962   0.6061   0.5902     241,502  24137.4
+3     gMLP                 0.5974  0.7367  0.4738  0.8095   0.6069   0.5879   2,379,782  14876.7
+4     GRUAttention         0.5955  0.7326  0.4693  0.8153   0.6043   0.5868     451,586  19215.3
+5     LSTMAttentionPlus    0.5951  0.7326  0.4694  0.8150   0.6057   0.5845     468,610  16844.5
+6     GRU                  0.5949  0.7326  0.4691  0.8136   0.6038   0.5861      31,702  1762.3
+7     ConvTranPlus         0.5948  0.7433  0.4808  0.7803   0.6020   0.5877      13,402  1841.1
+8     mWDN                 0.5937  0.7288  0.4652  0.8203   0.6032   0.5841     456,394  7589.5
+9     LSTMPlus             0.5936  0.7277  0.4641  0.8240   0.6030   0.5842      42,202   840.6
+10    TCN                  0.5935  0.7354  0.4724  0.8015   0.6035   0.5834      67,102  8693.9
+11    XResNet1dPlus        0.5933  0.7257  0.4621  0.8288   0.6036   0.5829   7,228,450  10136.5
+12    LSTMAttention        0.5932  0.7231  0.4597  0.8366   0.6025   0.5840     468,610  14947.1
+13    MLP                  0.5932  0.7275  0.4640  0.8236   0.6040   0.5824     529,502  1385.5
+14    MLSTM_FCNPlus        0.5930  0.7300  0.4662  0.8149   0.6026   0.5834     324,554  2031.6
+15    XCM                  0.5928  0.7283  0.4646  0.8198   0.6039   0.5817      20,100  1202.6
+16    LSTM                 0.5921  0.7280  0.4642  0.8179   0.6004   0.5838      42,202  1105.0
+17    InceptionTimePlus    0.5920  0.7224  0.4590  0.8345   0.6018   0.5822     455,490  5992.6
+18    GRUAttentionPlus     0.5919  0.7289  0.4652  0.8154   0.5999   0.5839     451,586  12112.7
+19    TSTPlus              0.5919  0.7230  0.4598  0.8333   0.6044   0.5795     404,866  13706.1
+20    FCNPlus              0.5916  0.7298  0.4661  0.8117   0.6032   0.5801     266,114  1442.5
+21    InceptionTime        0.5915  0.7204  0.4571  0.8380   0.5998   0.5833     455,490  5212.8
+33    ResNetPlus           0.5885  0.7192  0.4560  0.8332   0.6002   0.5768     479,490  2918.0
+34    LSTM_FCN             0.5881  0.7213  0.4576  0.8252   0.5998   0.5765     314,314  1546.4
+35    FCN                  0.5874  0.7191  0.4559  0.8299   0.6012   0.5736     266,114  1672.3
+36    LSTM_FCNPlus         0.5873  0.7185  0.4549  0.8284   0.5944   0.5801     314,314  1362.3
+37    GRU_FCNPlus          0.5870  0.7281  0.4638  0.8012   0.5967   0.5774     302,314  1757.4
+38    GRU_FCN              0.5862  0.7122  0.4491  0.8454   0.5992   0.5732     302,314  1759.8
+39    TransformerModel     0.5829  0.7301  0.4654  0.7825   0.5964   0.5694      33,986  2931.1
+40    MiniRocketPlus       0.5783  0.7254  0.4598  0.7807   0.5883   0.5683      39,986  3730.8
+41    PatchTST             0.5627  0.7145  0.4468  0.7618   0.5760   0.5493   6,333,170  38981.9
+42    XceptionTime         0.3894  0.2422  0.2422  1.0000   0.4179   0.3609     399,540  8136.7
+43    XceptionTimePlus     0.3894  0.2422  0.2422  1.0000   0.4179   0.3609     399,540  8005.4
+
+✓ Summary CSV  : tsai_benchmark_20260225_112716\tsai_classification_summary.csv
+✓ Per-model CSVs: tsai_benchmark_20260225_112716/
+PS D:\flight delay\stpn paper\STPN-main>

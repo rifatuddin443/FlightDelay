@@ -1,0 +1,155 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                FLIGHT DELAY PREDICTION BENCHMARK SUITE                       ║
+║                           Quick Reference Card                               ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+📊 MODELS INCLUDED (15 Total)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Classical (2):          Tree-Based ML (4):      Deep Learning (6):
+───────────────         ──────────────────      ──────────────────
+1. Historical Avg       3. Random Forest        7.  LSTM
+2. VAR                  4. Gradient Boosting    8.  GRU
+                        5. XGBoost              9.  Bi-LSTM
+                        6. LightGBM             10. CNN-LSTM
+                                                11. Attention-LSTM
+                                                12. Transformer
+
+Graph Neural Networks (2):              Custom (1):
+──────────────────────────              ───────────
+13. STPN                                15. Your CNN-KAN
+14. DSAFNet
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚀 QUICK START COMMANDS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1️⃣  CHECK SETUP
+    python check_benchmark_setup.py
+
+2️⃣  QUICK TEST (10 epochs, ~15 min)
+    python run_benchmark.py --quick_test
+
+3️⃣  FULL BENCHMARK (50 epochs, ~2 hrs)
+    python run_benchmark.py --data_dir cdata --epochs 50
+
+4️⃣  CUSTOM RUN
+    python run_benchmark.py --epochs 30 --batch_size 64 --lr 0.0001
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚙️  COMMON OPTIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Data:                          Training:                  Model Selection:
+────────────────────           ─────────────────          ────────────────
+--data_dir <path>              --epochs <n>               --skip_classical
+--seq_length <n>               --batch_size <n>           --skip_dl
+--pred_length <n>              --lr <float>               --skip_graph
+--test_ratio <f>                                          --quick_test
+
+Examples:
+  --data_dir cdata              Use China dataset
+  --epochs 100                  Train for 100 epochs
+  --skip_graph                  Skip STPN & DSAFNet
+  --quick_test                  Fast mode (10 epochs, limited models)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📈 EXPECTED PERFORMANCE (Typical MAE)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Best Performers:               Good Balance:              Fast Baselines:
+────────────────               ─────────────              ───────────────
+✨ XGBoost:       8-14         💚 Random Forest: 10-16    ⚡ LightGBM:    8-14
+✨ LightGBM:      8-14         💚 Bi-LSTM:       9-14     ⚡ Hist. Avg:  15-25
+✨ DSAFNet:       6-11         💚 CNN-LSTM:      8-13     ⚡ VAR:        12-20
+✨ STPN:          7-12         💚 Attention-LSTM: 7-13
+✨ CNN-KAN:       TBD          💚 Transformer:    8-14
+
+⏱️  TRAINING TIME (50 epochs, GPU)
+────────────────────────────────────────────────────────────────────
+⚡ Very Fast (<1 min):        HA, VAR
+⚡ Fast (1-5 min):            RF, XGB, LGB, GB
+🕐 Medium (5-15 min):         LSTM, GRU
+🕑 Slow (15-30 min):          Bi-LSTM, CNN-LSTM, Attention-LSTM, Transformer
+🕔 Very Slow (30-60 min):     STPN, DSAFNet, CNN-KAN
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📁 OUTPUT FILES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Location: benchmark_results_YYYYMMDD_HHMMSS/
+
+📊 benchmark_results_YYYYMMDD_HHMMSS.csv     ← Metrics table
+📄 benchmark_results_YYYYMMDD_HHMMSS.json    ← Detailed results
+📈 benchmark_comparison_YYYYMMDD_HHMMSS.png  ← Comparison plots
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 EVALUATION METRICS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✓ MAE   - Mean Absolute Error          (Lower is better ⬇️)
+✓ RMSE  - Root Mean Squared Error      (Lower is better ⬇️)
+✓ R²    - Coefficient of Determination (Higher is better ⬆️)
+✓ Time  - Training & Inference Time    (Faster is better ⌛)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🛠️  TROUBLESHOOTING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Problem                          Solution
+───────────────────────────────  ──────────────────────────────────────────
+❌ Out of memory                 --batch_size 16  or  --skip_graph
+❌ XGBoost not found             pip install xgboost
+❌ LightGBM not found            pip install lightgbm
+❌ STPN not available            Check model.py exists
+❌ DSAFNet not available         Check DSAFnet.py exists
+❌ Taking too long               --quick_test  or  --skip_classical
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💻 INSTALLATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+pip install -r benchmark_requirements.txt
+
+OR install selectively:
+
+# Core (required)
+pip install torch numpy pandas matplotlib seaborn scikit-learn
+
+# Tree-based models
+pip install xgboost lightgbm
+
+# Graph models
+pip install torch-geometric
+
+# Statistical methods
+pip install statsmodels
+
+# Privacy (optional)
+pip install opacus
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📚 DOCUMENTATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📖 BENCHMARK_README.md    - Full usage guide
+📖 MODELS_OVERVIEW.md     - Detailed model descriptions
+📖 check_benchmark_setup.py - Environment verification
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 RECOMMENDED WORKFLOW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. python check_benchmark_setup.py      # Verify environment
+2. python run_benchmark.py --quick_test # Quick sanity check
+3. python run_benchmark.py --epochs 50  # Full benchmark
+4. Review results in benchmark_results_*/
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+             For detailed help, see BENCHMARK_README.md
+                      Happy Benchmarking! 🚀
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                       Version 1.0 | February 2026                            ║
+╚══════════════════════════════════════════════════════════════════════════════╝

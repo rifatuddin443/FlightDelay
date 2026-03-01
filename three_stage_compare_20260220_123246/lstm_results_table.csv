@@ -1,0 +1,68 @@
+================================================================================
+COMPREHENSIVE EVALUATION RESULTS
+================================================================================
+
+MODEL,LSTM
+DP Enabled,False
+Target Epsilon,7.5000
+Final Epsilon,0.0000
+Final Delta,0.00e+00
+
+CLASSIFICATION METRICS (Macro over Arrival/Departure)
+Precision,0.2796
+Recall,0.3101
+F1 Score,0.2821
+Accuracy,0.6098
+
+Per-Channel Metrics:
+Channel,Precision,Recall,F1 Score,Accuracy
+Arrival,0.2246,0.3744,0.2808,0.4932
+Departure,0.3345,0.2457,0.2833,0.7263
+
+REGRESSION (delayed),MAE=10.8393,RMSE=13.1020
+REGRESSION (non-delayed),MAE=5.7655,RMSE=7.3910
+REGRESSION (overall),MAE=6.9942,RMSE=9.1087
+
+SUMMARY (raw metric/value)
+metric,value
+classification_precision,0.27956626497379233
+classification_recall,0.3100680654913169
+classification_f1,0.28205105418014276
+classification_accuracy,0.6097822108345311
+classification_precision_arrival,0.22458444148934303
+classification_recall_arrival,0.3744007537339798
+classification_f1_arrival,0.2807567981222014
+classification_accuracy_arrival,0.49322840409954266
+classification_precision_departure,0.3345480884582416
+classification_recall_departure,0.245735377248654
+classification_f1_departure,0.2833453102380842
+classification_accuracy_departure,0.7263360175695195
+regression_mae_delayed,10.839313778804911
+regression_rmse_delayed,13.102012950424866
+regression_mae_nondelayed,5.765495842302878
+regression_rmse_nondelayed,7.3909515227024105
+regression_mae_overall,6.994206657379653
+regression_rmse_overall,9.10870743689079
+regression_mae_delayed_arrival,10.146438761006788
+regression_rmse_delayed_arrival,12.381321963952411
+num_delayed_samples_arrival,72174
+regression_mae_delayed_departure,11.670749976300371
+regression_rmse_delayed_departure,13.917654567713246
+num_delayed_samples_departure,60146
+regression_mae_nondelayed_arrival,6.984650115946429
+regression_rmse_nondelayed_arrival,8.368596913644174
+num_nondelayed_samples_arrival,201026
+regression_mae_nondelayed_departure,4.6151691316404735
+regression_rmse_nondelayed_departure,6.331566429088229
+num_nondelayed_samples_departure,213054
+regression_mae_overall_arrival,7.81993171795443
+regression_rmse_overall_arrival,9.593228391676044
+regression_mae_overall_departure,6.168481596804872
+regression_rmse_overall_departure,8.59692220314223
+num_delayed_samples,132320
+num_nondelayed_samples,414080
+target_epsilon,7.5
+final_epsilon,0.0
+epsilon_exceeded,False
+epsilon_overshoot,0.0
+final_delta,0.0

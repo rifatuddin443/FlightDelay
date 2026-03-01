@@ -1,0 +1,13 @@
+metric,value
+precision_arrival,0.468113
+recall_arrival,0.748621
+f1_arrival,0.576033
+accuracy_arrival,0.708876
+precision_departure,0.425427
+recall_departure,0.775014
+f1_departure,0.549318
+accuracy_departure,0.720029
+precision,0.446770
+recall,0.761818
+f1,0.562675
+accuracy,0.714453

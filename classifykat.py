@@ -267,22 +267,70 @@ def load_flight_data(
     adj_mx = np.load(os.path.join(data_dir, adj_file))
     delay_data = np.load(os.path.join(data_dir, delay_file))
 
+    # Canonical dimensions from delay tensor
+    # delay_data: [num_nodes, timesteps, delay_dim]
+    num_nodes = int(delay_data.shape[0])
+    total_steps = int(delay_data.shape[1])
+
     weather_path = os.path.join(data_dir, weather_file)
     if not os.path.exists(weather_path):
         raise FileNotFoundError(f"Weather file not found: {weather_path}")
     weather_data = np.load(weather_path)
-    if weather_data.ndim == 2:
-        weather_data = weather_data[..., np.newaxis]
 
-    if weather_data.shape[0] != delay_data.shape[0] or weather_data.shape[1] != delay_data.shape[1]:
-        raise ValueError('Weather data shape must align with delay data (num_nodes, timesteps, features).')
+    # Accept common weather formats and broadcast to per-node shape.
+    # Target shape: [num_nodes, timesteps, weather_dim]
+    if weather_data.ndim == 1:
+        # [timesteps]
+        if weather_data.shape[0] != total_steps:
+            raise ValueError(
+                "Weather data 1D shape must be [timesteps]. "
+                f"Got {weather_data.shape}, expected ({total_steps},)."
+            )
+        weather_data = weather_data.reshape(total_steps, 1)
+        weather_data = np.broadcast_to(weather_data[None, :, :], (num_nodes, total_steps, 1))
+    elif weather_data.ndim == 2:
+        # Either [timesteps, weather_dim] (global) or [num_nodes, timesteps] (single feature)
+        if weather_data.shape[0] == total_steps:
+            # [timesteps, weather_dim]
+            weather_data = np.broadcast_to(weather_data[None, :, :], (num_nodes, total_steps, weather_data.shape[1]))
+        elif weather_data.shape[0] == num_nodes and weather_data.shape[1] == total_steps:
+            # [num_nodes, timesteps] -> add feature dim
+            weather_data = weather_data[:, :, None]
+        else:
+            raise ValueError(
+                "Unsupported 2D weather shape. Expected [timesteps, weather_dim] or [num_nodes, timesteps]. "
+                f"Got {weather_data.shape} with num_nodes={num_nodes}, timesteps={total_steps}."
+            )
+    elif weather_data.ndim == 3:
+        # Either [num_nodes, timesteps, weather_dim] or [timesteps, num_nodes, weather_dim]
+        if weather_data.shape[0] == num_nodes and weather_data.shape[1] == total_steps:
+            pass
+        elif weather_data.shape[0] == total_steps and weather_data.shape[1] == num_nodes:
+            weather_data = np.transpose(weather_data, (1, 0, 2))
+        elif weather_data.shape[0] == 1 and weather_data.shape[1] == total_steps:
+            weather_data = np.broadcast_to(weather_data, (num_nodes, total_steps, weather_data.shape[2]))
+        else:
+            raise ValueError(
+                "Unsupported 3D weather shape. Expected [num_nodes, timesteps, weather_dim] (or transposed). "
+                f"Got {weather_data.shape} with num_nodes={num_nodes}, timesteps={total_steps}."
+            )
+    else:
+        raise ValueError(
+            "Unsupported weather array rank. Expected 1D/2D/3D numpy array. "
+            f"Got ndim={weather_data.ndim}, shape={weather_data.shape}."
+        )
 
-    num_nodes = od_mx.shape[0]
+    if weather_data.shape[0] != num_nodes or weather_data.shape[1] != total_steps:
+        raise ValueError(
+            "Weather data shape must align after normalization to [num_nodes, timesteps, weather_dim]. "
+            f"Got {weather_data.shape}, expected ({num_nodes}, {total_steps}, weather_dim)."
+        )
+
+    # num_nodes is derived from delay_data; od_mx should match but we keep delay_data as ground-truth.
     edge_index_od = torch.tensor(np.array(od_mx.nonzero()), dtype=torch.long)
     edge_index_od_t = torch.tensor(np.array(od_mx.T.nonzero()), dtype=torch.long)
     edge_index_adj = torch.tensor(np.array(adj_mx.nonzero()), dtype=torch.long)
 
-    total_steps = delay_data.shape[1]
     train_end = int(train_ratio * total_steps)
     val_end = int((train_ratio + val_ratio) * total_steps)
 

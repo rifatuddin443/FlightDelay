@@ -24,6 +24,18 @@ def test_error(y_predict, y_test):
     :param y_predict.
     :return:
     """
+    def _to_numpy(data):
+        if hasattr(data, 'detach'):
+            data = data.detach()
+        if hasattr(data, 'cpu'):
+            data = data.cpu()
+        if hasattr(data, 'numpy'):
+            return data.numpy()
+        return np.asarray(data)
+
+    y_predict = _to_numpy(y_predict)
+    y_test = _to_numpy(y_test)
+
     err = y_predict - y_test
     MAE = np.mean(np.abs(err[~np.isnan(err)]))
     

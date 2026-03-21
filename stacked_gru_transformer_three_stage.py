@@ -6,12 +6,13 @@ import math
 import os
 import time
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
+from torch.cuda.amp import GradScaler, autocast
 
 from classifykat import EarlyStopping, load_flight_data, set_seed
 from classifykat_balanced import build_sequences_node_level
@@ -22,6 +23,92 @@ from stacked_gru_transformer import (
     build_classifier,
     classification_metrics_per_channel,
 )
+
+
+class ResidualRegressor(nn.Module):
+    def __init__(self, dim: int, out_dim: int, dropout: float = 0.2) -> None:
+        super().__init__()
+        self.in_norm = nn.LayerNorm(dim)
+        self.fc1 = nn.Linear(dim, dim)
+        self.fc2 = nn.Linear(dim, dim)
+        self.fc3 = nn.Linear(dim, dim)
+        self.act = nn.GELU()
+        self.drop = nn.Dropout(dropout)
+        self.out = nn.Linear(dim, out_dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h = self.in_norm(x)
+        r = h
+        h = self.drop(self.act(self.fc1(h)))
+        h = self.drop(self.act(self.fc2(h)))
+        h = h + r
+        h = self.drop(self.act(self.fc3(h)))
+        return self.out(h)
+
+
+class GRURegressionHead(nn.Module):
+    def __init__(self, c_in: int, c_out: int, dropout: float = 0.15) -> None:
+        super().__init__()
+        self.encoder = GRUAttentionEncoder(
+            c_in=c_in,
+            gru_dim=c_in,
+            n_layers=2,
+            n_heads=4,
+            dropout=dropout,
+        )
+        self.head = nn.Sequential(
+            nn.LayerNorm(c_in),
+            nn.Linear(c_in, c_in),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(c_in, c_out),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        seq = self.encoder(x)
+        pooled = seq.mean(dim=2)
+        return self.head(pooled)
+
+
+def build_regressor_head(
+    name: str,
+    feature_dim: int,
+    out_dim: int,
+    seq_len: int,
+    dropout: float = 0.2,
+) -> Tuple[nn.Module, bool]:
+    if name == "mlp":
+        return nn.Sequential(
+            nn.LayerNorm(feature_dim),
+            nn.Linear(feature_dim, feature_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(feature_dim, out_dim),
+        ), False
+    if name == "deep_mlp":
+        hidden = feature_dim
+        return nn.Sequential(
+            nn.LayerNorm(feature_dim),
+            nn.Linear(feature_dim, hidden),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden, hidden),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden, hidden // 2),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden // 2, out_dim),
+        ), False
+    if name == "residual_mlp":
+        return ResidualRegressor(feature_dim, out_dim, dropout=dropout), False
+    if name == "gru":
+        return GRURegressionHead(feature_dim, out_dim, dropout=dropout), True
+    if name == "tsit":
+        return build_classifier("TSiTPlus", c_in=feature_dim, c_out=out_dim, seq_len=seq_len), True
+    if name == "convtran":
+        return build_classifier("ConvTranPlus", c_in=feature_dim, c_out=out_dim, seq_len=seq_len), True
+    raise ValueError(f"Unknown regressor type: {name}")
 
 
 def epsilon_upper_bound_approx(
@@ -112,6 +199,58 @@ def _dp_noise_and_step(
     optimizer.step()
 
 
+def _get_batched_edges(
+    cache: Dict[int, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]],
+    edge_index_adj: torch.Tensor,
+    edge_index_od: torch.Tensor,
+    edge_index_od_t: torch.Tensor,
+    n_nodes: int,
+    batch_size: int,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    if batch_size not in cache:
+        cache[batch_size] = (
+            batch_edge_index(edge_index_adj, n_nodes, batch_size),
+            batch_edge_index(edge_index_od, n_nodes, batch_size),
+            batch_edge_index(edge_index_od_t, n_nodes, batch_size),
+        )
+    return cache[batch_size]
+
+
+def _build_regression_feature_dataset(
+    model: StackedGRUThreeStagePredictor,
+    source_loader: Iterable,
+    edge_index_adj: torch.Tensor,
+    edge_index_od: torch.Tensor,
+    edge_index_od_t: torch.Tensor,
+    n_nodes: int,
+    device: torch.device,
+    use_amp: bool,
+) -> TensorDataset:
+    model.eval()
+    features: List[torch.Tensor] = []
+    targets: List[torch.Tensor] = []
+    edge_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = {}
+
+    with torch.no_grad():
+        for bx, by_reg, _ in source_loader:
+            bx = bx.to(device, non_blocking=True)
+            bsz = bx.size(0)
+            bei_adj, bei_od, bei_od_t = _get_batched_edges(
+                edge_cache,
+                edge_index_adj,
+                edge_index_od,
+                edge_index_od_t,
+                n_nodes,
+                bsz,
+            )
+            with autocast(enabled=use_amp):
+                pooled = model._extract_pooled_features(bx, bei_adj, bei_od, bei_od_t)
+            features.append(pooled.float().cpu())
+            targets.append(by_reg.float().cpu())
+
+    return TensorDataset(torch.cat(features, dim=0), torch.cat(targets, dim=0))
+
+
 def _dp_stage1_step(
     model: StackedGRUThreeStagePredictor,
     optimizer: torch.optim.Optimizer,
@@ -166,35 +305,26 @@ def _dp_stage1_step(
 
 
 def _dp_stage_reg_step(
-    model: StackedGRUThreeStagePredictor,
+    regressor: nn.Module,
     optimizer: torch.optim.Optimizer,
-    bx: torch.Tensor,
+    feat_batch: torch.Tensor,
     by_reg: torch.Tensor,
-    ei_adj: torch.Tensor,
-    ei_od: torch.Tensor,
-    ei_od_t: torch.Tensor,
-    n_nodes: int,
     max_grad_norm: float,
     noise_multiplier: float,
     device: torch.device,
-    *,
-    which: str,
     mask_fn,
+    huber_delta: float,
 ) -> Tuple[float, float]:
-    params = [p for p in model.parameters() if p.requires_grad]
+    params = [p for p in regressor.parameters() if p.requires_grad]
     accum_grads = [torch.zeros_like(p, device=device) for p in params]
 
-    bx = bx.to(device, non_blocking=True)
+    feat_batch = feat_batch.to(device, non_blocking=True)
     by_reg = by_reg.to(device, non_blocking=True)
-    bsz = bx.size(0)
+    bsz = feat_batch.size(0)
     total_loss = 0.0
     total_mask = 0.0
 
-    bei_adj_1 = batch_edge_index(ei_adj, n_nodes, 1)
-    bei_od_1 = batch_edge_index(ei_od, n_nodes, 1)
-    bei_od_t_1 = batch_edge_index(ei_od_t, n_nodes, 1)
-
-    huber = nn.HuberLoss(reduction="none", delta=2.0 if which == "delayed" else 1.0)
+    huber = nn.HuberLoss(reduction="none", delta=huber_delta)
 
     for i in range(bsz):
         optimizer.zero_grad(set_to_none=True)
@@ -205,13 +335,7 @@ def _dp_stage_reg_step(
         if mask_sum <= 0.0:
             continue
 
-        preds = model.forward_regressor(
-            bx[i : i + 1],
-            bei_adj_1,
-            bei_od_1,
-            bei_od_t_1,
-            which=which,
-        )
+        preds = regressor(feat_batch[i : i + 1])
         per = huber(preds, yi) * mask
         denom = mask.sum(dim=(0, 1)).clamp_min(1.0)
         loss = (per.sum(dim=(0, 1)) / denom).mean()
@@ -245,6 +369,7 @@ class StackedGRUThreeStagePredictor(nn.Module):
         gat_hidden: int = 64,
         gat_heads: int = 2,
         classifier_name: str = "TSiTPlus",
+        regressor_name: str = "mlp",
         dropout: float = 0.15,
         chunk_size: int = 200,
     ) -> None:
@@ -252,6 +377,7 @@ class StackedGRUThreeStagePredictor(nn.Module):
         self.c_out = c_out
         self.chunk_size = chunk_size
         self.feature_dim = gru_dim + gat_hidden
+        self.seq_len = seq_len
 
         self.encoder = GRUAttentionEncoder(
             c_in=c_in,
@@ -272,22 +398,23 @@ class StackedGRUThreeStagePredictor(nn.Module):
             seq_len=seq_len,
         )
 
-        self.regressor_delayed = nn.Sequential(
-            nn.LayerNorm(self.feature_dim),
-            nn.Linear(self.feature_dim, self.feature_dim),
-            nn.GELU(),
-            nn.Dropout(0.2),
-            nn.Linear(self.feature_dim, c_out),
+        self.regressor_name = regressor_name
+        self.regressor_delayed, self.regressor_expects_sequence = build_regressor_head(
+            regressor_name,
+            self.feature_dim,
+            c_out,
+            seq_len=seq_len,
+            dropout=0.2,
         )
-        self.regressor_nondelayed = nn.Sequential(
-            nn.LayerNorm(self.feature_dim),
-            nn.Linear(self.feature_dim, self.feature_dim),
-            nn.GELU(),
-            nn.Dropout(0.2),
-            nn.Linear(self.feature_dim, c_out),
+        self.regressor_nondelayed, _ = build_regressor_head(
+            regressor_name,
+            self.feature_dim,
+            c_out,
+            seq_len=seq_len,
+            dropout=0.2,
         )
 
-    def _extract_pooled_features(
+    def _extract_enriched_sequence(
         self,
         x: torch.Tensor,
         edge_index_adj: torch.Tensor,
@@ -304,8 +431,17 @@ class StackedGRUThreeStagePredictor(nn.Module):
         gat_out = self.gat(gru_pooled, edge_index_adj, edge_index_od, edge_index_od_t)
         gat_broadcast = gat_out.unsqueeze(2).expand(-1, -1, seq_len)
         enriched = torch.cat([gru_seq, gat_broadcast], dim=1)
-        pooled = enriched.mean(dim=2)
-        return pooled.view(bsz, n_nodes, self.feature_dim)
+        return enriched.view(bsz, n_nodes, self.feature_dim, seq_len)
+
+    def _extract_pooled_features(
+        self,
+        x: torch.Tensor,
+        edge_index_adj: torch.Tensor,
+        edge_index_od: torch.Tensor,
+        edge_index_od_t: torch.Tensor,
+    ) -> torch.Tensor:
+        enriched = self._extract_enriched_sequence(x, edge_index_adj, edge_index_od, edge_index_od_t)
+        return enriched.mean(dim=3)
 
     def forward_classifier(
         self,
@@ -314,17 +450,12 @@ class StackedGRUThreeStagePredictor(nn.Module):
         edge_index_od: torch.Tensor,
         edge_index_od_t: torch.Tensor,
     ) -> torch.Tensor:
-        bsz, n_nodes, _, _ = x.shape
+        bsz, n_nodes, _, seq_len = x.shape
         total = bsz * n_nodes
+        enriched = self._extract_enriched_sequence(x, edge_index_adj, edge_index_od, edge_index_od_t)
+        enriched_flat = enriched.view(total, self.feature_dim, seq_len)
 
-        x_flat = x.view(total, x.size(2), x.size(3))
-        gru_seq = self.encoder(x_flat)
-        gru_pooled = gru_seq.mean(dim=2)
-        gat_out = self.gat(gru_pooled, edge_index_adj, edge_index_od, edge_index_od_t)
-        gat_broadcast = gat_out.unsqueeze(2).expand(-1, -1, x.size(3))
-        enriched = torch.cat([gru_seq, gat_broadcast], dim=1)
-
-        logits = self.classifier(enriched)
+        logits = self.classifier(enriched_flat)
         if isinstance(logits, (tuple, list)):
             logits = logits[0]
         if logits.dim() > 2:
@@ -340,6 +471,20 @@ class StackedGRUThreeStagePredictor(nn.Module):
         *,
         which: str = "delayed",
     ) -> torch.Tensor:
+        if self.regressor_expects_sequence:
+            enriched = self._extract_enriched_sequence(x, edge_index_adj, edge_index_od, edge_index_od_t)
+            bsz, n_nodes, feature_dim, seq_len = enriched.shape
+            seq_flat = enriched.view(bsz * n_nodes, feature_dim, seq_len)
+            if which == "delayed":
+                pred = self.regressor_delayed(seq_flat)
+            else:
+                pred = self.regressor_nondelayed(seq_flat)
+            if isinstance(pred, (tuple, list)):
+                pred = pred[0]
+            if pred.dim() > 2:
+                pred = pred.flatten(1)
+            return pred.view(bsz, n_nodes, self.c_out)
+
         pooled = self._extract_pooled_features(x, edge_index_adj, edge_index_od, edge_index_od_t)
         if which == "delayed":
             return self.regressor_delayed(pooled)
@@ -367,6 +512,16 @@ def _channel_stats(mask: torch.Tensor) -> float:
     return float(mask.float().mean().item()) if mask.numel() > 0 else 0.0
 
 
+def _iter_limited(loader: DataLoader, max_batches: int):
+    if max_batches is None or max_batches <= 0:
+        yield from loader
+        return
+    for idx, batch in enumerate(loader):
+        if idx >= max_batches:
+            break
+        yield batch
+
+
 def train_stage1(
     model: StackedGRUThreeStagePredictor,
     optimizer: torch.optim.Optimizer,
@@ -388,6 +543,10 @@ def train_stage1(
     target_delta: float,
     sample_rate: float,
     privacy_steps_offset: int,
+    use_amp: bool,
+    max_train_batches: int,
+    max_val_batches: int,
+    effective_train_steps: int,
 ) -> Tuple[List[Dict], float]:
     t0 = time.time()
     print("\n" + "=" * 80)
@@ -410,17 +569,24 @@ def train_stage1(
     history: List[Dict] = []
     best_f1 = -1.0
     best_state = None
+    edge_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = {}
+    scaler = GradScaler(enabled=(use_amp and not dp_enabled))
 
     for epoch in range(1, epochs + 1):
         ep_t0 = time.time()
         model.train()
         train_losses: List[float] = []
 
-        for bx, by_reg, by_cls in train_loader:
+        for bx, by_reg, by_cls in _iter_limited(train_loader, max_train_batches):
             bsz = bx.size(0)
-            bei_adj = batch_edge_index(edge_index_adj, n_nodes, bsz)
-            bei_od = batch_edge_index(edge_index_od, n_nodes, bsz)
-            bei_od_t = batch_edge_index(edge_index_od_t, n_nodes, bsz)
+            bei_adj, bei_od, bei_od_t = _get_batched_edges(
+                edge_cache,
+                edge_index_adj,
+                edge_index_od,
+                edge_index_od_t,
+                n_nodes,
+                bsz,
+            )
 
             if dp_enabled:
                 loss = _dp_stage1_step(
@@ -441,11 +607,14 @@ def train_stage1(
                 bx = bx.to(device, non_blocking=True)
                 by_cls = by_cls.to(device, non_blocking=True)
                 optimizer.zero_grad(set_to_none=True)
-                logits = model.forward_classifier(bx, bei_adj, bei_od, bei_od_t)
-                loss_t = loss_fn(logits, by_cls)
-                loss_t.backward()
+                with autocast(enabled=use_amp):
+                    logits = model.forward_classifier(bx, bei_adj, bei_od, bei_od_t)
+                    loss_t = loss_fn(logits, by_cls)
+                scaler.scale(loss_t).backward()
+                scaler.unscale_(optimizer)
                 nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                optimizer.step()
+                scaler.step(optimizer)
+                scaler.update()
                 loss = float(loss_t.item())
 
             train_losses.append(float(loss))
@@ -453,13 +622,19 @@ def train_stage1(
         model.eval()
         val_probs, val_targets = [], []
         with torch.no_grad():
-            for bx, _, by_cls in val_loader:
+            for bx, _, by_cls in _iter_limited(val_loader, max_val_batches):
                 bx = bx.to(device, non_blocking=True)
                 bsz = bx.size(0)
-                bei_adj = batch_edge_index(edge_index_adj, n_nodes, bsz)
-                bei_od = batch_edge_index(edge_index_od, n_nodes, bsz)
-                bei_od_t = batch_edge_index(edge_index_od_t, n_nodes, bsz)
-                logits = model.forward_classifier(bx, bei_adj, bei_od, bei_od_t)
+                bei_adj, bei_od, bei_od_t = _get_batched_edges(
+                    edge_cache,
+                    edge_index_adj,
+                    edge_index_od,
+                    edge_index_od_t,
+                    n_nodes,
+                    bsz,
+                )
+                with autocast(enabled=use_amp):
+                    logits = model.forward_classifier(bx, bei_adj, bei_od, bei_od_t)
                 val_probs.append(torch.sigmoid(logits).cpu())
                 val_targets.append(by_cls)
 
@@ -492,7 +667,7 @@ def train_stage1(
                 "epsilon_approx": epsilon_upper_bound_approx(
                     noise_multiplier=noise_multiplier,
                     sample_rate=sample_rate,
-                    steps=privacy_steps_offset + epoch * len(train_loader),
+                    steps=privacy_steps_offset + epoch * effective_train_steps,
                     delta=target_delta,
                 ) if dp_enabled else 0.0,
             }
@@ -538,6 +713,12 @@ def train_stage2(
     target_delta: float,
     sample_rate: float,
     privacy_steps_offset: int,
+    use_amp: bool,
+    cache_stage_features: bool,
+    base_num_workers: int,
+    max_train_batches: int,
+    max_val_batches: int,
+    effective_train_steps: int,
 ) -> Tuple[List[Dict], float]:
     t0 = time.time()
     print("\n" + "=" * 80)
@@ -578,6 +759,43 @@ def train_stage2(
     history: List[Dict] = []
     best_val = float("inf")
     best_state = None
+    edge_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = {}
+    scaler_amp = GradScaler(enabled=(use_amp and not dp_enabled))
+
+    feature_train_loader = None
+    feature_val_loader = None
+    if cache_stage_features:
+        print("  [perf] caching frozen stage-2 features...")
+        train_feat_ds = _build_regression_feature_dataset(
+            model,
+            _iter_limited(train_loader, max_train_batches),
+            edge_index_adj,
+            edge_index_od,
+            edge_index_od_t,
+            n_nodes,
+            device,
+            use_amp,
+        )
+        val_feat_ds = _build_regression_feature_dataset(
+            model,
+            _iter_limited(val_loader, max_val_batches),
+            edge_index_adj,
+            edge_index_od,
+            edge_index_od_t,
+            n_nodes,
+            device,
+            use_amp,
+        )
+        worker_count = min(2, max(0, base_num_workers))
+        loader_kwargs = dict(
+            num_workers=worker_count,
+            pin_memory=(device.type == "cuda"),
+            persistent_workers=(worker_count > 0),
+        )
+        if worker_count > 0:
+            loader_kwargs["prefetch_factor"] = 2
+        feature_train_loader = DataLoader(train_feat_ds, batch_size=train_loader.batch_size, shuffle=True, drop_last=True, **loader_kwargs)
+        feature_val_loader = DataLoader(val_feat_ds, batch_size=val_loader.batch_size, shuffle=False, drop_last=False, **loader_kwargs)
 
     for epoch in range(1, epochs + 1):
         ep_t0 = time.time()
@@ -585,11 +803,13 @@ def train_stage2(
         tr_losses: List[float] = []
         tr_masks: List[float] = []
 
-        for bx, by_reg, _ in train_loader:
+        if feature_train_loader is not None:
+            iter_train = ((bf, by_reg, None) for bf, by_reg in feature_train_loader)
+        else:
+            iter_train = _iter_limited(train_loader, max_train_batches)
+
+        for bx, by_reg, _ in iter_train:
             bsz = bx.size(0)
-            bei_adj = batch_edge_index(edge_index_adj, n_nodes, bsz)
-            bei_od = batch_edge_index(edge_index_od, n_nodes, bsz)
-            bei_od_t = batch_edge_index(edge_index_od_t, n_nodes, bsz)
 
             if dp_enabled:
                 def _mask_delayed(yi: torch.Tensor) -> torch.Tensor:
@@ -598,48 +818,108 @@ def train_stage2(
                         thr = thr.expand(yi.shape[-1])
                     return (yi > thr).float()
 
+                if feature_train_loader is not None:
+                    feat_batch = bx
+                else:
+                    bx_dev = bx.to(device, non_blocking=True)
+                    with torch.no_grad():
+                        if model.regressor_expects_sequence:
+                            bei_adj, bei_od, bei_od_t = _get_batched_edges(
+                                edge_cache,
+                                edge_index_adj,
+                                edge_index_od,
+                                edge_index_od_t,
+                                n_nodes,
+                                bsz,
+                            )
+                            feat_batch = model._extract_enriched_sequence(bx_dev, bei_adj, bei_od, bei_od_t).detach()
+                        else:
+                            bei_adj, bei_od, bei_od_t = _get_batched_edges(
+                                edge_cache,
+                                edge_index_adj,
+                                edge_index_od,
+                                edge_index_od_t,
+                                n_nodes,
+                                bsz,
+                            )
+                            feat_batch = model._extract_pooled_features(bx_dev, bei_adj, bei_od, bei_od_t).detach()
+
                 loss_val, mask_ratio = _dp_stage_reg_step(
-                    model,
+                    model.regressor_delayed,
                     optimizer,
-                    bx,
+                    feat_batch,
                     by_reg,
-                    edge_index_adj,
-                    edge_index_od,
-                    edge_index_od_t,
-                    n_nodes,
                     max_grad_norm,
                     noise_multiplier,
                     device,
-                    which="delayed",
                     mask_fn=_mask_delayed,
+                    huber_delta=2.0,
                 )
                 tr_losses.append(float(loss_val))
                 tr_masks.append(float(mask_ratio))
             else:
-                bx = bx.to(device, non_blocking=True)
                 by_reg = by_reg.to(device, non_blocking=True)
+                if feature_train_loader is not None:
+                    feat_batch = bx.to(device, non_blocking=True)
+                else:
+                    bx = bx.to(device, non_blocking=True)
+                    bei_adj, bei_od, bei_od_t = _get_batched_edges(
+                        edge_cache,
+                        edge_index_adj,
+                        edge_index_od,
+                        edge_index_od_t,
+                        n_nodes,
+                        bsz,
+                    )
+                    with torch.no_grad():
+                        if model.regressor_expects_sequence:
+                            feat_batch = model._extract_enriched_sequence(bx, bei_adj, bei_od, bei_od_t)
+                        else:
+                            feat_batch = model._extract_pooled_features(bx, bei_adj, bei_od, bei_od_t)
                 optimizer.zero_grad(set_to_none=True)
-                preds = model.forward_regressor(bx, bei_adj, bei_od, bei_od_t, which="delayed")
-                loss, mask = masked_loss(preds, by_reg)
-                loss.backward()
+                with autocast(enabled=use_amp):
+                    preds = model.regressor_delayed(feat_batch)
+                    loss, mask = masked_loss(preds, by_reg)
+                scaler_amp.scale(loss).backward()
+                scaler_amp.unscale_(optimizer)
                 nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                optimizer.step()
+                scaler_amp.step(optimizer)
+                scaler_amp.update()
                 tr_losses.append(float(loss.item()))
                 tr_masks.append(_channel_stats(mask))
 
         model.eval()
         va_losses: List[float] = []
         va_masks: List[float] = []
+        if feature_val_loader is not None:
+            iter_val = ((bf, by_reg, None) for bf, by_reg in feature_val_loader)
+        else:
+            iter_val = _iter_limited(val_loader, max_val_batches)
+
         with torch.no_grad():
-            for bx, by_reg, _ in val_loader:
-                bx = bx.to(device, non_blocking=True)
+            for bx, by_reg, _ in iter_val:
                 by_reg = by_reg.to(device, non_blocking=True)
                 bsz = bx.size(0)
-                bei_adj = batch_edge_index(edge_index_adj, n_nodes, bsz)
-                bei_od = batch_edge_index(edge_index_od, n_nodes, bsz)
-                bei_od_t = batch_edge_index(edge_index_od_t, n_nodes, bsz)
-                preds = model.forward_regressor(bx, bei_adj, bei_od, bei_od_t, which="delayed")
-                loss, mask = masked_loss(preds, by_reg)
+                if feature_val_loader is not None:
+                    feat_batch = bx.to(device, non_blocking=True)
+                else:
+                    bx = bx.to(device, non_blocking=True)
+                    bei_adj, bei_od, bei_od_t = _get_batched_edges(
+                        edge_cache,
+                        edge_index_adj,
+                        edge_index_od,
+                        edge_index_od_t,
+                        n_nodes,
+                        bsz,
+                    )
+                    with autocast(enabled=use_amp):
+                        if model.regressor_expects_sequence:
+                            feat_batch = model._extract_enriched_sequence(bx, bei_adj, bei_od, bei_od_t)
+                        else:
+                            feat_batch = model._extract_pooled_features(bx, bei_adj, bei_od, bei_od_t)
+                with autocast(enabled=use_amp):
+                    preds = model.regressor_delayed(feat_batch)
+                    loss, mask = masked_loss(preds, by_reg)
                 va_losses.append(float(loss.item()))
                 va_masks.append(_channel_stats(mask))
 
@@ -665,7 +945,7 @@ def train_stage2(
                 "epsilon_approx": epsilon_upper_bound_approx(
                     noise_multiplier=noise_multiplier,
                     sample_rate=sample_rate,
-                    steps=privacy_steps_offset + epoch * len(train_loader),
+                    steps=privacy_steps_offset + epoch * effective_train_steps,
                     delta=target_delta,
                 ) if dp_enabled else 0.0,
             }
@@ -709,6 +989,12 @@ def train_stage3(
     target_delta: float,
     sample_rate: float,
     privacy_steps_offset: int,
+    use_amp: bool,
+    cache_stage_features: bool,
+    base_num_workers: int,
+    max_train_batches: int,
+    max_val_batches: int,
+    effective_train_steps: int,
 ) -> Tuple[List[Dict], float]:
     t0 = time.time()
     print("\n" + "=" * 80)
@@ -746,6 +1032,43 @@ def train_stage3(
     history: List[Dict] = []
     best_val = float("inf")
     best_state = None
+    edge_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = {}
+    scaler_amp = GradScaler(enabled=(use_amp and not dp_enabled))
+
+    feature_train_loader = None
+    feature_val_loader = None
+    if cache_stage_features:
+        print("  [perf] caching frozen stage-3 features...")
+        train_feat_ds = _build_regression_feature_dataset(
+            model,
+            _iter_limited(train_loader, max_train_batches),
+            edge_index_adj,
+            edge_index_od,
+            edge_index_od_t,
+            n_nodes,
+            device,
+            use_amp,
+        )
+        val_feat_ds = _build_regression_feature_dataset(
+            model,
+            _iter_limited(val_loader, max_val_batches),
+            edge_index_adj,
+            edge_index_od,
+            edge_index_od_t,
+            n_nodes,
+            device,
+            use_amp,
+        )
+        worker_count = min(2, max(0, base_num_workers))
+        loader_kwargs = dict(
+            num_workers=worker_count,
+            pin_memory=(device.type == "cuda"),
+            persistent_workers=(worker_count > 0),
+        )
+        if worker_count > 0:
+            loader_kwargs["prefetch_factor"] = 2
+        feature_train_loader = DataLoader(train_feat_ds, batch_size=train_loader.batch_size, shuffle=True, drop_last=True, **loader_kwargs)
+        feature_val_loader = DataLoader(val_feat_ds, batch_size=val_loader.batch_size, shuffle=False, drop_last=False, **loader_kwargs)
 
     for epoch in range(1, epochs + 1):
         ep_t0 = time.time()
@@ -753,7 +1076,12 @@ def train_stage3(
         tr_losses: List[float] = []
         tr_masks: List[float] = []
 
-        for bx, by_reg, _ in train_loader:
+        if feature_train_loader is not None:
+            iter_train = ((bf, by_reg, None) for bf, by_reg in feature_train_loader)
+        else:
+            iter_train = _iter_limited(train_loader, max_train_batches)
+
+        for bx, by_reg, _ in iter_train:
             bsz = bx.size(0)
 
             if dp_enabled:
@@ -764,65 +1092,122 @@ def train_stage3(
                         yi_den = yi * std_t + mean_t
                     return (yi_den.abs() < float(delay_threshold)).float()
 
+                if feature_train_loader is not None:
+                    feat_batch = bx
+                else:
+                    bx_dev = bx.to(device, non_blocking=True)
+                    with torch.no_grad():
+                        if model.regressor_expects_sequence:
+                            bei_adj, bei_od, bei_od_t = _get_batched_edges(
+                                edge_cache,
+                                edge_index_adj,
+                                edge_index_od,
+                                edge_index_od_t,
+                                n_nodes,
+                                bsz,
+                            )
+                            feat_batch = model._extract_enriched_sequence(bx_dev, bei_adj, bei_od, bei_od_t).detach()
+                        else:
+                            bei_adj, bei_od, bei_od_t = _get_batched_edges(
+                                edge_cache,
+                                edge_index_adj,
+                                edge_index_od,
+                                edge_index_od_t,
+                                n_nodes,
+                                bsz,
+                            )
+                            feat_batch = model._extract_pooled_features(bx_dev, bei_adj, bei_od, bei_od_t).detach()
+
                 loss_val, mask_ratio = _dp_stage_reg_step(
-                    model,
+                    model.regressor_nondelayed,
                     optimizer,
-                    bx,
+                    feat_batch,
                     by_reg,
-                    edge_index_adj,
-                    edge_index_od,
-                    edge_index_od_t,
-                    n_nodes,
                     max_grad_norm,
                     noise_multiplier,
                     device,
-                    which="nondelayed",
                     mask_fn=_mask_nondelayed,
+                    huber_delta=1.0,
                 )
                 tr_losses.append(float(loss_val))
                 tr_masks.append(float(mask_ratio))
             else:
-                bx = bx.to(device, non_blocking=True)
                 by_reg = by_reg.to(device, non_blocking=True)
+                if feature_train_loader is not None:
+                    feat_batch = bx.to(device, non_blocking=True)
+                else:
+                    bx = bx.to(device, non_blocking=True)
+                    bei_adj, bei_od, bei_od_t = _get_batched_edges(
+                        edge_cache,
+                        edge_index_adj,
+                        edge_index_od,
+                        edge_index_od_t,
+                        n_nodes,
+                        bsz,
+                    )
+                    with torch.no_grad():
+                        if model.regressor_expects_sequence:
+                            feat_batch = model._extract_enriched_sequence(bx, bei_adj, bei_od, bei_od_t)
+                        else:
+                            feat_batch = model._extract_pooled_features(bx, bei_adj, bei_od, bei_od_t)
+
                 mask = nondelayed_mask(by_reg)
                 if float(mask.sum().item()) <= 0.0:
                     continue
 
-                bei_adj = batch_edge_index(edge_index_adj, n_nodes, bsz)
-                bei_od = batch_edge_index(edge_index_od, n_nodes, bsz)
-                bei_od_t = batch_edge_index(edge_index_od_t, n_nodes, bsz)
-
                 optimizer.zero_grad(set_to_none=True)
-                preds = model.forward_regressor(bx, bei_adj, bei_od, bei_od_t, which="nondelayed")
-                per = huber(preds, by_reg) * mask
-                denom = mask.sum(dim=(0, 1)).clamp_min(1.0)
-                loss_ch = per.sum(dim=(0, 1)) / denom
-                loss = loss_ch.mean()
-                loss.backward()
+                with autocast(enabled=use_amp):
+                    preds = model.regressor_nondelayed(feat_batch)
+                    per = huber(preds, by_reg) * mask
+                    denom = mask.sum(dim=(0, 1)).clamp_min(1.0)
+                    loss_ch = per.sum(dim=(0, 1)) / denom
+                    loss = loss_ch.mean()
+                scaler_amp.scale(loss).backward()
+                scaler_amp.unscale_(optimizer)
                 nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                optimizer.step()
+                scaler_amp.step(optimizer)
+                scaler_amp.update()
                 tr_losses.append(float(loss.item()))
                 tr_masks.append(_channel_stats(mask))
 
         model.eval()
         va_losses: List[float] = []
         va_masks: List[float] = []
+        if feature_val_loader is not None:
+            iter_val = ((bf, by_reg, None) for bf, by_reg in feature_val_loader)
+        else:
+            iter_val = _iter_limited(val_loader, max_val_batches)
+
         with torch.no_grad():
-            for bx, by_reg, _ in val_loader:
-                bx = bx.to(device, non_blocking=True)
+            for bx, by_reg, _ in iter_val:
                 by_reg = by_reg.to(device, non_blocking=True)
                 bsz = bx.size(0)
+                if feature_val_loader is not None:
+                    feat_batch = bx.to(device, non_blocking=True)
+                else:
+                    bx = bx.to(device, non_blocking=True)
+                    bei_adj, bei_od, bei_od_t = _get_batched_edges(
+                        edge_cache,
+                        edge_index_adj,
+                        edge_index_od,
+                        edge_index_od_t,
+                        n_nodes,
+                        bsz,
+                    )
+                    with autocast(enabled=use_amp):
+                        if model.regressor_expects_sequence:
+                            feat_batch = model._extract_enriched_sequence(bx, bei_adj, bei_od, bei_od_t)
+                        else:
+                            feat_batch = model._extract_pooled_features(bx, bei_adj, bei_od, bei_od_t)
                 mask = nondelayed_mask(by_reg)
                 if float(mask.sum().item()) <= 0.0:
                     continue
-                bei_adj = batch_edge_index(edge_index_adj, n_nodes, bsz)
-                bei_od = batch_edge_index(edge_index_od, n_nodes, bsz)
-                bei_od_t = batch_edge_index(edge_index_od_t, n_nodes, bsz)
-                preds = model.forward_regressor(bx, bei_adj, bei_od, bei_od_t, which="nondelayed")
-                per = huber(preds, by_reg) * mask
-                denom = mask.sum(dim=(0, 1)).clamp_min(1.0)
-                loss_ch = per.sum(dim=(0, 1)) / denom
-                loss = loss_ch.mean()
+                with autocast(enabled=use_amp):
+                    preds = model.regressor_nondelayed(feat_batch)
+                    per = huber(preds, by_reg) * mask
+                    denom = mask.sum(dim=(0, 1)).clamp_min(1.0)
+                    loss_ch = per.sum(dim=(0, 1)) / denom
+                    loss = loss_ch.mean()
                 va_losses.append(float(loss.item()))
                 va_masks.append(_channel_stats(mask))
 
@@ -848,7 +1233,7 @@ def train_stage3(
                 "epsilon_approx": epsilon_upper_bound_approx(
                     noise_multiplier=noise_multiplier,
                     sample_rate=sample_rate,
-                    steps=privacy_steps_offset + epoch * len(train_loader),
+                    steps=privacy_steps_offset + epoch * effective_train_steps,
                     delta=target_delta,
                 ) if dp_enabled else 0.0,
             }
@@ -893,23 +1278,32 @@ def final_evaluation(
     delta: float,
     noise_multiplier: float,
     max_grad_norm: float,
+    use_amp: bool,
+    max_test_batches: int,
 ) -> None:
     model.eval()
     cls_probs, cls_targets = [], []
     reg_preds_delayed, reg_preds_nondelayed, reg_targets = [], [], []
 
+    edge_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = {}
     with torch.no_grad():
-        for bx, by_reg, by_cls in test_loader:
+        for bx, by_reg, by_cls in _iter_limited(test_loader, max_test_batches):
             bx = bx.to(device, non_blocking=True)
             by_reg = by_reg.to(device, non_blocking=True)
             bsz = bx.size(0)
-            bei_adj = batch_edge_index(edge_index_adj, n_nodes, bsz)
-            bei_od = batch_edge_index(edge_index_od, n_nodes, bsz)
-            bei_od_t = batch_edge_index(edge_index_od_t, n_nodes, bsz)
+            bei_adj, bei_od, bei_od_t = _get_batched_edges(
+                edge_cache,
+                edge_index_adj,
+                edge_index_od,
+                edge_index_od_t,
+                n_nodes,
+                bsz,
+            )
 
-            logits = model.forward_classifier(bx, bei_adj, bei_od, bei_od_t)
-            pred_delayed = model.forward_regressor(bx, bei_adj, bei_od, bei_od_t, which="delayed")
-            pred_nondelayed = model.forward_regressor(bx, bei_adj, bei_od, bei_od_t, which="nondelayed")
+            with autocast(enabled=use_amp):
+                logits = model.forward_classifier(bx, bei_adj, bei_od, bei_od_t)
+                pred_delayed = model.forward_regressor(bx, bei_adj, bei_od, bei_od_t, which="delayed")
+                pred_nondelayed = model.forward_regressor(bx, bei_adj, bei_od, bei_od_t, which="nondelayed")
 
             cls_probs.append(torch.sigmoid(logits).cpu())
             cls_targets.append(by_cls)
@@ -1022,6 +1416,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--gat_hidden", type=int, default=64)
     p.add_argument("--gat_heads", type=int, default=2)
     p.add_argument("--classifier", type=str, default="TSiTPlus", choices=["TSiTPlus", "ConvTranPlus"])
+    p.add_argument(
+        "--regressor",
+        type=str,
+        default="mlp",
+        choices=["mlp", "deep_mlp", "residual_mlp", "gru", "tsit", "convtran"],
+        help="Regressor head used for delayed/non-delayed stages",
+    )
     p.add_argument("--dropout", type=float, default=0.15)
     p.add_argument("--chunk_size", type=int, default=200)
 
@@ -1049,6 +1450,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--device", type=str, default="auto")
     p.add_argument("--num_workers", type=int, default=-1, help="-1 auto (Windows=0, else min(8,cpu_count))")
+    p.add_argument("--no_amp", action="store_true", help="Disable mixed precision AMP on CUDA")
+    p.add_argument(
+        "--no_cache_stage23_features",
+        action="store_true",
+        help="Disable feature caching for stage 2/3 (slower, but lower host RAM usage)",
+    )
+    p.add_argument("--max_train_batches", type=int, default=0, help="Limit train batches per epoch for quick benchmarks (0=all)")
+    p.add_argument("--max_val_batches", type=int, default=0, help="Limit val batches per epoch for quick benchmarks (0=all)")
+    p.add_argument("--max_test_batches", type=int, default=0, help="Limit test batches for quick benchmarks (0=all)")
     p.add_argument("--output_dir", type=str, default="auto")
     return p.parse_args()
 
@@ -1067,6 +1477,9 @@ def main() -> None:
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
         torch.set_float32_matmul_precision("high")
+
+    use_amp = (device.type == "cuda") and (not args.no_amp)
+    cache_stage23_features = not args.no_cache_stage23_features
 
     if args.data_source == "udata":
         args.weather_file = "weather2016_2021.npy"
@@ -1182,10 +1595,12 @@ def main() -> None:
         **loader_kwargs,
     )
 
+    effective_train_steps = args.max_train_batches if args.max_train_batches > 0 else len(train_loader)
+
     pos_rate = trY_cls.reshape(-1, delay_dim).mean(dim=0)
     pos_weight = (1.0 - pos_rate + 1e-6) / (pos_rate + 1e-6)
 
-    steps_per_stage = len(train_loader)
+    steps_per_stage = effective_train_steps
     total_steps = (args.stage1_epochs + args.stage2_epochs + args.stage3_epochs) * steps_per_stage
     sample_rate = args.batch_size / max(1, len(train_loader.dataset))
 
@@ -1216,6 +1631,8 @@ def main() -> None:
         epsilon_final = 0.0
         print("[DP] Disabled")
 
+    print(f"[PERF] AMP={'on' if use_amp else 'off'} | cache_stage23_features={'on' if cache_stage23_features else 'off'}")
+
     model = StackedGRUThreeStagePredictor(
         c_in=feature_dim,
         c_out=delay_dim,
@@ -1226,9 +1643,16 @@ def main() -> None:
         gat_hidden=args.gat_hidden,
         gat_heads=args.gat_heads,
         classifier_name=args.classifier,
+        regressor_name=args.regressor,
         dropout=args.dropout,
         chunk_size=args.chunk_size,
     ).to(device)
+
+    if model.regressor_expects_sequence and cache_stage23_features:
+        cache_stage23_features = False
+        print("[PERF] stage2/3 feature cache auto-disabled for sequence regressor")
+
+    print(f"[MODEL] classifier={args.classifier} | regressor={args.regressor}")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
 
@@ -1261,6 +1685,10 @@ def main() -> None:
         args.delta,
         sample_rate,
         0,
+        use_amp,
+        args.max_train_batches,
+        args.max_val_batches,
+        effective_train_steps,
     )
 
     h2, t2 = train_stage2(
@@ -1284,6 +1712,12 @@ def main() -> None:
         args.delta,
         sample_rate,
         args.stage1_epochs * steps_per_stage,
+        use_amp,
+        cache_stage23_features,
+        worker_count,
+        args.max_train_batches,
+        args.max_val_batches,
+        effective_train_steps,
     )
 
     h3, t3 = train_stage3(
@@ -1307,6 +1741,12 @@ def main() -> None:
         args.delta,
         sample_rate,
         (args.stage1_epochs + args.stage2_epochs) * steps_per_stage,
+        use_amp,
+        cache_stage23_features,
+        worker_count,
+        args.max_train_batches,
+        args.max_val_batches,
+        effective_train_steps,
     )
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1335,6 +1775,8 @@ def main() -> None:
         float(args.delta),
         float(sigma),
         float(args.max_grad_norm),
+        use_amp,
+        args.max_test_batches,
     )
 
 

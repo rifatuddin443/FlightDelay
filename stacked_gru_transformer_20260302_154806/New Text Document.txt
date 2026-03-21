@@ -1,0 +1,138 @@
+PS D:\flight delay\stpn paper\STPN-main> python stacked_gru_transformer.py --classifier TSiTPlus --epochs 50
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'pyg-lib'. Disabling its usage. Stacktrace: Could not find module 'C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\libpyg.pyd' (or one of its dependencies). Try using the full path with constructor syntax.
+  import torch_geometric.typing
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-scatter'. Disabling its usage. Stacktrace: Could not find module 'C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_scatter\_scatter_cuda.pyd' (or one of its dependencies). Try using the full path with constructor syntax.
+  import torch_geometric.typing
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-cluster'. Disabling its usage. Stacktrace: Could not find module 'C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_cluster\_grid_cuda.pyd' (or one of its dependencies). Try using the full path with constructor syntax.
+  import torch_geometric.typing
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-spline-conv'. Disabling its usage. Stacktrace: Could not find module 'C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_spline_conv\_basis_cuda.pyd' (or one of its dependencies). Try using the full path with constructor syntax.    
+  import torch_geometric.typing
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-sparse'. Disabling its usage. Stacktrace: Could not find module 'C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_sparse\_convert_cuda.pyd' (or one of its dependencies). Try using the full path with constructor syntax.
+  import torch_geometric.typing
+
+=================================================================
+  Stacked GRUAttention → Transformer Classifier  |  device=cpu
+  Architecture: GRU encoder → multi-edge GAT → transformer head
+  KAN available: True
+  Classifiers: TSiTPlus
+=================================================================
+
+[1/4] Loading data ...
+  Nodes: 50  feature_dim: 3  delay_dim: 2  seq_len: 18
+[2/4] Building sequences ...
+
+Node-level balance: 23.33% delayed
+
+Node-level balance: 17.16% delayed
+
+Node-level balance: 24.22% delayed
+  Train (19197, 50, 3, 18)  Val (2717, 50, 3, 18)  Test (5464, 50, 3, 18)
+  c_in=3  c_out=2  n_nodes=50
+  Class balance (train): 23.33% delayed
+
+[3/4] Training 1 stacked model(s) ...
+
+
+────────────────────────────────────────────────────────────
+  [1/1] GRUAttn->TSiTPlus
+  GRU: dim=64, layers=2, heads=4
+  GAT: hidden=64, heads=2
+  Classifier input: 128 channels × 18 timesteps
+────────────────────────────────────────────────────────────
+  params: 830,021  (encoder=71,488  GAT=141,571  classifier=616,962)
+    epoch   5/50  loss=0.7741  val_f1=0.4621  lr=1.00e-04
+    epoch  10/50  loss=0.7513  val_f1=0.4645  lr=9.71e-05
+    epoch  15/50  loss=0.7436  val_f1=0.4685  lr=8.89e-05
+    epoch  20/50  loss=0.7382  val_f1=0.4710  lr=7.62e-05
+    epoch  25/50  loss=0.7344  val_f1=0.4706  lr=6.07e-05
+    epoch  30/50  loss=0.7317  val_f1=0.4723  lr=4.43e-05
+    epoch  35/50  loss=0.7294  val_f1=0.4741  lr=2.88e-05
+    epoch  40/50  loss=0.7274  val_f1=0.4714  lr=1.61e-05
+    epoch  45/50  loss=0.7269  val_f1=0.4728  lr=7.86e-06
+    epoch  50/50  loss=0.7263  val_f1=0.4738  lr=5.00e-06
+
+⏹️  Early stopping triggered! No improvement for 12 epochs.
+   Best score: 0.4753 at epoch 38
+    early stop @ epoch 50  best_val_f1=0.4753
+  Saved best model -> stacked_gru_transformer_20260301_194354\Stacked_GRUAttn_TSiTPlus_best.pth
+
+  F1=0.5939  Acc=0.7310  |  F1_arr=0.6047  F1_dep=0.5832  (70413.5s)
+
+============================================================
+[4/4] Writing summary -> stacked_gru_transformer_20260301_194354
+============================================================
+
+Rank  Model                    F1     Acc    Prec     Rec   F1_arr   F1_dep       Params      sec
+─────────────────────────────────────────────────────────────────────────────────────────────────
+1     GRUAttn->TSiTPlus    0.5939  0.7310  0.4677  0.8158   0.6047   0.5832      830,021  70413.5
+
+Summary CSV : stacked_gru_transformer_20260301_194354\stacked_gru_transformer_summary.csv
+Per-model   : stacked_gru_transformer_20260301_194354/
+PS D:\flight delay\stpn paper\STPN-main> python stacked_gru_transformer.py --classifier ConvTranPlus --epochs 50
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'pyg-lib'. Disabling its usage. Stacktrace: Could not find module 'C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\libpyg.pyd' (or one of its dependencies). Try using the full path with constructor syntax.       
+  import torch_geometric.typing
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-scatter'. Disabling its usage. Stacktrace: Could not find module 'C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_scatter\_scatter_cuda.pyd' (or one of its dependencies). Try using the full path with constructor syntax.
+  import torch_geometric.typing
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-cluster'. Disabling its usage. Stacktrace: Could not find module 'C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_cluster\_grid_cuda.pyd' (or one of its dependencies). Try using the full path with constructor syntax.
+  import torch_geometric.typing
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-spline-conv'. Disabling its usage. Stacktrace: Could not find module 'C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_spline_conv\_basis_cuda.pyd' (or one of its dependencies). Try using the full path with constructor syntax.
+  import torch_geometric.typing
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_geometric\__init__.py:4: UserWarning: An issue occurred while importing 'torch-sparse'. Disabling its usage. Stacktrace: Could not find module 'C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch_sparse\_convert_cuda.pyd' (or one of its dependencies). Try using the full path with constructor syntax.
+  import torch_geometric.typing
+
+=================================================================
+  Stacked GRUAttention → Transformer Classifier  |  device=cpu
+  Architecture: GRU encoder → multi-edge GAT → transformer head
+  KAN available: True
+  Classifiers: ConvTranPlus
+=================================================================
+
+[1/4] Loading data ...
+  Nodes: 50  feature_dim: 3  delay_dim: 2  seq_len: 18
+[2/4] Building sequences ...
+
+Node-level balance: 23.33% delayed
+
+Node-level balance: 17.16% delayed
+
+Node-level balance: 24.22% delayed
+  Train (19197, 50, 3, 18)  Val (2717, 50, 3, 18)  Test (5464, 50, 3, 18)
+  c_in=3  c_out=2  n_nodes=50
+  Class balance (train): 23.33% delayed
+
+[3/4] Training 1 stacked model(s) ...
+
+
+────────────────────────────────────────────────────────────
+  [1/1] GRUAttn->ConvTranPlus
+  GRU: dim=64, layers=2, heads=4
+  GAT: hidden=64, heads=2
+  Classifier input: 128 channels × 18 timesteps
+────────────────────────────────────────────────────────────
+  params: 354,461  (encoder=71,488  GAT=141,571  classifier=141,402)
+    epoch   5/50  loss=0.8157  val_f1=0.4550  lr=1.00e-04
+    epoch  10/50  loss=0.7663  val_f1=0.4698  lr=9.71e-05
+    epoch  15/50  loss=0.7479  val_f1=0.4704  lr=8.89e-05
+    epoch  20/50  loss=0.7377  val_f1=0.4701  lr=7.62e-05
+    epoch  25/50  loss=0.7322  val_f1=0.4720  lr=6.07e-05
+    epoch  30/50  loss=0.7279  val_f1=0.4740  lr=4.43e-05
+    epoch  35/50  loss=0.7258  val_f1=0.4712  lr=2.88e-05
+
+⏹️  Early stopping triggered! No improvement for 12 epochs.
+   Best score: 0.4759 at epoch 26
+    early stop @ epoch 38  best_val_f1=0.4759
+  Saved best model -> stacked_gru_transformer_20260302_154806\Stacked_GRUAttn_ConvTranPlus_best.pth
+
+  F1=0.5916  Acc=0.7323  |  F1_arr=0.6007  F1_dep=0.5824  (106677.2s)
+
+============================================================
+[4/4] Writing summary -> stacked_gru_transformer_20260302_154806
+============================================================
+
+Rank  Model                        F1     Acc    Prec     Rec   F1_arr   F1_dep       Params      sec
+─────────────────────────────────────────────────────────────────────────────────────────────────────
+1     GRUAttn->ConvTranPlus    0.5916  0.7323  0.4685  0.8037   0.6007   0.5824      354,461  106677.2
+
+Summary CSV : stacked_gru_transformer_20260302_154806\stacked_gru_transformer_summary.csv
+Per-model   : stacked_gru_transformer_20260302_154806/
+PS D:\flight delay\stpn paper\STPN-main> 

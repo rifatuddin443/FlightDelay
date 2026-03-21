@@ -373,29 +373,53 @@ def train_and_evaluate(
     patience: int,
     class_threshold: float = 0.5,
     save_path: Optional[str] = None,
+    accumulation_steps: int = 4,
 ) -> Tuple[Dict[str, float], float]:
-    """Train HybridGraphTSAI with BCEWithLogitsLoss + cosine LR."""
+    """Train HybridGraphTSAI with BCEWithLogitsLoss + warmup + cosine LR.
+
+    Key design choices for graph-level training:
+      • Separate param groups: backbone LR=lr, graph layers LR=lr*3
+      • Linear warmup for first 5 epochs → cosine decay
+      • Gradient accumulation to simulate larger effective batch
+    """
 
     # Pre-move fixed edge indices to device
     ei_adj   = edge_index_adj.to(device)
     ei_od    = edge_index_od.to(device)
     ei_od_t  = edge_index_od_t.to(device)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=epochs, eta_min=lr * 0.05
-    )
+    # ── separate param groups: backbone (pretrained-style) vs graph (new) ────
+    backbone_params = list(model.backbone.parameters())
+    graph_params    = (list(model.gat.parameters()) +
+                       list(model.classifier.parameters()))
+    optimizer = torch.optim.AdamW([
+        {"params": backbone_params, "lr": lr,      "weight_decay": 1e-4},
+        {"params": graph_params,    "lr": lr * 3,  "weight_decay": 1e-5},
+    ])
+
+    # ── warmup + cosine schedule ──────────────────────────────────────────────
+    warmup_epochs = min(5, max(1, epochs // 6))
+    def lr_lambda(epoch):
+        if epoch < warmup_epochs:
+            return (epoch + 1) / warmup_epochs  # linear warmup
+        progress = (epoch - warmup_epochs) / max(1, epochs - warmup_epochs)
+        return 0.05 + 0.95 * 0.5 * (1 + np.cos(np.pi * progress))  # cosine → 5%
+
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
     loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight.to(device))
     es      = EarlyStopping(patience=patience, mode="max")
 
     best_f1, best_state = -1.0, None
     t0 = time.time()
+    acc_steps = max(1, accumulation_steps)
 
     for epoch in range(1, epochs + 1):
         # ── train ─────────────────────────────────────────────────────────────
         model.train()
         ep_losses: List[float] = []
-        for bx, by in train_loader:
+        optimizer.zero_grad(set_to_none=True)
+        for step, (bx, by) in enumerate(train_loader, 1):
             B = bx.size(0)
             bx = bx.to(device)     # (B, n_nodes, c_in, seq_len)
             by = by.to(device)     # (B, n_nodes, c_out)  float
@@ -405,13 +429,15 @@ def train_and_evaluate(
             bei_od    = batch_edge_index(ei_od,    n_nodes, B)
             bei_od_t  = batch_edge_index(ei_od_t,  n_nodes, B)
 
-            optimizer.zero_grad(set_to_none=True)
             logits = model(bx, bei_adj, bei_od, bei_od_t)  # (B, N, c_out)
-            loss   = loss_fn(logits, by)
+            loss   = loss_fn(logits, by) / acc_steps
             loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
-            ep_losses.append(loss.item())
+            ep_losses.append(loss.item() * acc_steps)
+
+            if step % acc_steps == 0 or step == len(train_loader):
+                nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
 
         scheduler.step()
 
@@ -506,11 +532,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--gat_heads",         type=int,   default=2)
     p.add_argument("--weather_file",      type=str,   default="weather_cn.npy")
     p.add_argument("--period_hours",      type=int,   default=24)
-    p.add_argument("--epochs",            type=int,   default=30)
-    p.add_argument("--batch_size",        type=int,   default=32,
+    p.add_argument("--epochs",            type=int,   default=50)
+    p.add_argument("--batch_size",        type=int,   default=64,
                    help="Number of graph snapshots per batch")
-    p.add_argument("--lr",                type=float, default=3e-4)
-    p.add_argument("--patience",          type=int,   default=8)
+    p.add_argument("--lr",                type=float, default=1e-4)
+    p.add_argument("--patience",          type=int,   default=12)
+    p.add_argument("--accumulation_steps", type=int,  default=4,
+                   help="Gradient accumulation steps (effective batch = batch_size * this)")
     p.add_argument("--seed",              type=int,   default=42)
     p.add_argument("--output_dir",        type=str,   default="auto")
     p.add_argument("--device",            type=str,   default="auto")
@@ -681,6 +709,7 @@ def main() -> None:
                 patience   = args.patience,
                 class_threshold = args.class_threshold,
                 save_path = save_path,
+                accumulation_steps = args.accumulation_steps,
             )
             results[display_name] = metrics
             timings[display_name] = t_sec

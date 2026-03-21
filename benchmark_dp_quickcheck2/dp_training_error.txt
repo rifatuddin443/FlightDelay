@@ -1,0 +1,77 @@
+Traceback (most recent call last):
+  File "d:\flight delay\stpn paper\STPN-main\stacked_gru_transformer_fixed_epsilon_dp.py", line 653, in main
+    metrics, train_sec = train_and_evaluate_dp(
+                         ^^^^^^^^^^^^^^^^^^^^^^
+  File "d:\flight delay\stpn paper\STPN-main\stacked_gru_transformer_fixed_epsilon_dp.py", line 287, in train_and_evaluate_dp
+    loss = _train_step_dp(
+           ^^^^^^^^^^^^^^^
+  File "d:\flight delay\stpn paper\STPN-main\stacked_gru_transformer_fixed_epsilon_dp.py", line 181, in _train_step_dp
+    per_sample_grads, per_sample_losses = torch_func.vmap(
+                                          ^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_functorch\apis.py", line 202, in wrapped
+    return vmap_impl(
+           ^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_functorch\vmap.py", line 334, in vmap_impl
+    return _flat_vmap(
+           ^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_functorch\vmap.py", line 484, in _flat_vmap
+    batched_outputs = func(*batched_inputs, **kwargs)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_functorch\apis.py", line 441, in wrapper
+    return eager_transforms.grad_and_value_impl(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_functorch\vmap.py", line 48, in fn
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_functorch\eager_transforms.py", line 1364, in grad_and_value_impl
+    output = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "d:\flight delay\stpn paper\STPN-main\stacked_gru_transformer_fixed_epsilon_dp.py", line 167, in single_loss
+    logits = torch_func.functional_call(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_functorch\functional_call.py", line 148, in functional_call
+    return nn.utils.stateless._functional_call(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\utils\stateless.py", line 282, in _functional_call
+    return module(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "d:\flight delay\stpn paper\STPN-main\stacked_gru_transformer.py", line 375, in forward
+    gru_chunks.append(self._encode_chunk(x_flat[i : i + cs]))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "d:\flight delay\stpn paper\STPN-main\stacked_gru_transformer_fixed_epsilon_dp.py", line 632, in _encode_chunk_no_ckpt
+    return self.encoder(chunk)
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "d:\flight delay\stpn paper\STPN-main\stacked_gru_transformer.py", line 153, in forward
+    h, _ = self.gru(h)  # bidir concat → (B, T, gru_dim)
+           ^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\rnn.py", line 1333, in forward
+    self._update_flat_weights()
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\rnn.py", line 392, in _update_flat_weights
+    self._init_flat_weights()
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\rnn.py", line 215, in _init_flat_weights
+    self.flatten_parameters()
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\rnn.py", line 255, in flatten_parameters
+    unique_data_ptrs = {
+                       ^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\rnn.py", line 256, in <setcomp>
+    p.data_ptr() for p in self._flat_weights  # type: ignore[union-attr]
+    ^^^^^^^^^^^^
+RuntimeError: Cannot access data pointer of Tensor that doesn't have storage

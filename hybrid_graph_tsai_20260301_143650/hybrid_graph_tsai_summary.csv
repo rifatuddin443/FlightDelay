@@ -1,0 +1,2 @@
+model,n_params,train_sec,f1,accuracy,precision,recall,f1_arrival,accuracy_arrival,precision_arrival,recall_arrival,f1_departure,accuracy_departure,precision_departure,recall_departure
+Hybrid-TSiTPlus,773251,15130.2,0.5180,0.6829,0.4104,0.7067,0.5426,0.6904,0.4450,0.6951,0.4935,0.6754,0.3759,0.7183

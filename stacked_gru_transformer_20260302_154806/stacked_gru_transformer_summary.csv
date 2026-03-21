@@ -1,0 +1,2 @@
+model,n_params,train_sec,f1,accuracy,precision,recall,f1_arrival,accuracy_arrival,precision_arrival,recall_arrival,f1_departure,accuracy_departure,precision_departure,recall_departure
+GRUAttn->ConvTranPlus,354461,106677.2,0.5916,0.7323,0.4685,0.8037,0.6007,0.7227,0.4847,0.7897,0.5824,0.7418,0.4523,0.8178

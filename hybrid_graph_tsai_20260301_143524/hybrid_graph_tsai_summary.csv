@@ -1,0 +1,2 @@
+model,n_params,train_sec,f1,accuracy,precision,recall,f1_arrival,accuracy_arrival,precision_arrival,recall_arrival,f1_departure,accuracy_departure,precision_departure,recall_departure
+Hybrid-GRU,194319,5419.3,0.5865,0.7175,0.4539,0.8310,0.5984,0.7121,0.4738,0.8120,0.5745,0.7228,0.4339,0.8501

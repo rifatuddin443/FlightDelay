@@ -1,0 +1,108 @@
+Traceback (most recent call last):
+  File "d:\flight delay\stpn paper\STPN-main\stacked_gru_transformer_fixed_epsilon_dp.py", line 619, in main
+    metrics, train_sec = train_and_evaluate_dp(
+                         ^^^^^^^^^^^^^^^^^^^^^^
+  File "d:\flight delay\stpn paper\STPN-main\stacked_gru_transformer_fixed_epsilon_dp.py", line 274, in train_and_evaluate_dp
+    loss = _train_step_dp(
+           ^^^^^^^^^^^^^^^
+  File "d:\flight delay\stpn paper\STPN-main\stacked_gru_transformer_fixed_epsilon_dp.py", line 177, in _train_step_dp
+    per_sample_grads, per_sample_losses = torch_func.vmap(
+                                          ^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_functorch\apis.py", line 202, in wrapped
+    return vmap_impl(
+           ^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_functorch\vmap.py", line 334, in vmap_impl
+    return _flat_vmap(
+           ^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_functorch\vmap.py", line 484, in _flat_vmap
+    batched_outputs = func(*batched_inputs, **kwargs)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_functorch\apis.py", line 441, in wrapper
+    return eager_transforms.grad_and_value_impl(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_functorch\vmap.py", line 48, in fn
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_functorch\eager_transforms.py", line 1364, in grad_and_value_impl
+    output = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "d:\flight delay\stpn paper\STPN-main\stacked_gru_transformer_fixed_epsilon_dp.py", line 164, in single_loss
+    logits = torch_func.functional_call(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_functorch\functional_call.py", line 148, in functional_call
+    return nn.utils.stateless._functional_call(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\utils\stateless.py", line 282, in _functional_call
+    return module(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "d:\flight delay\stpn paper\STPN-main\stacked_gru_transformer.py", line 375, in forward
+    gru_chunks.append(self._encode_chunk(x_flat[i : i + cs]))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "d:\flight delay\stpn paper\STPN-main\stacked_gru_transformer.py", line 345, in _encode_chunk
+    return grad_checkpoint(self.encoder, chunk, use_reentrant=False)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_compile.py", line 51, in inner
+    return disable_fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_dynamo\eval_frame.py", line 838, in _fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\utils\checkpoint.py", line 494, in checkpoint
+    next(gen)
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\utils\checkpoint.py", line 1527, in _checkpoint_without_reentrant_generator
+    new_frame.input_saver = _NoopSaveInputs.apply(dummy, kwargs, *args)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\autograd\function.py", line 585, in apply
+    return custom_function_call(cls, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_functorch\autograd_function.py", line 49, in __call__
+    return super().__call__(autograd_function, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_ops.py", line 471, in __call__
+    return wrapper()
+           ^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_ops.py", line 467, in wrapper
+    return self.dispatch(
+           ^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_ops.py", line 330, in dispatch
+    return dispatch_functorch(self, args, kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_functorch\pyfunctorch.py", line 294, in dispatch_functorch
+    return interpreter.process(op, args, kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_functorch\pyfunctorch.py", line 173, in process
+    return kernel(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_functorch\autograd_function.py", line 93, in custom_function_call_grad
+    flat_out = Generated.apply(*operands)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_functorch\autograd_function.py", line 108, in forward
+    unwrapped_output = custom_function_call(
+                       ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_functorch\autograd_function.py", line 49, in __call__
+    return super().__call__(autograd_function, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_ops.py", line 471, in __call__
+    return wrapper()
+           ^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_ops.py", line 467, in wrapper
+    return self.dispatch(
+           ^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_ops.py", line 330, in dispatch
+    return dispatch_functorch(self, args, kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_functorch\pyfunctorch.py", line 294, in dispatch_functorch
+    return interpreter.process(op, args, kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_functorch\pyfunctorch.py", line 130, in process
+    return kernel(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\_functorch\autograd_function.py", line 307, in custom_function_call_vmap
+    raise RuntimeError(
+RuntimeError: You tried to vmap over _NoopSaveInputs, but it does not have vmap support. Please override and implement the vmap staticmethod or set generate_vmap_rule=True. For more details, please see https://pytorch.org/docs/main/notes/extending.func.html

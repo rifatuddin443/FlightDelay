@@ -1,0 +1,28 @@
+Traceback (most recent call last):
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\utils\data\dataloader.py", line 1284, in _try_get_data
+    data = self._data_queue.get(timeout=timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\queue.py", line 179, in get
+    raise Empty
+_queue.Empty
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "d:\flight delay\stpn paper\STPN-main\stacked_gru_transformer_fixed_epsilon_dp.py", line 605, in main
+    metrics, train_sec = train_and_evaluate_dp(
+                         ^^^^^^^^^^^^^^^^^^^^^^
+  File "d:\flight delay\stpn paper\STPN-main\stacked_gru_transformer_fixed_epsilon_dp.py", line 273, in train_and_evaluate_dp
+    for bx, by in train_loader:
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\utils\data\dataloader.py", line 733, in __next__
+    data = self._next_data()
+           ^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\utils\data\dataloader.py", line 1491, in _next_data
+    idx, data = self._get_data()
+                ^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\utils\data\dataloader.py", line 1443, in _get_data
+    success, data = self._try_get_data()
+                    ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\utils\data\dataloader.py", line 1297, in _try_get_data
+    raise RuntimeError(
+RuntimeError: DataLoader worker (pid(s) 9204, 10052) exited unexpectedly

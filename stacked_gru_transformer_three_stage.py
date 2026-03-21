@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 import os
 import time
 from datetime import datetime
@@ -21,6 +22,215 @@ from stacked_gru_transformer import (
     build_classifier,
     classification_metrics_per_channel,
 )
+
+
+def epsilon_upper_bound_approx(
+    *,
+    noise_multiplier: float,
+    sample_rate: float,
+    steps: int,
+    delta: float,
+) -> float:
+    if noise_multiplier <= 0:
+        return float("inf")
+    if sample_rate <= 0 or steps <= 0 or not (0.0 < delta < 1.0):
+        return float("inf")
+
+    term1 = sample_rate * math.sqrt(2.0 * steps * math.log(1.0 / delta)) / noise_multiplier
+    term2 = steps * (sample_rate ** 2) / (noise_multiplier ** 2)
+    return float(term1 + term2)
+
+
+def solve_noise_multiplier_for_epsilon(
+    *,
+    target_epsilon: float,
+    delta: float,
+    sample_rate: float,
+    steps: int,
+    tol: float = 1e-3,
+    max_iter: int = 80,
+) -> float:
+    if target_epsilon <= 0:
+        raise ValueError("target_epsilon must be > 0")
+
+    lo, hi = 1e-4, 1.0
+    eps_hi = epsilon_upper_bound_approx(
+        noise_multiplier=hi,
+        sample_rate=sample_rate,
+        steps=steps,
+        delta=delta,
+    )
+
+    expand_guard = 0
+    while eps_hi > target_epsilon and expand_guard < 60:
+        hi *= 2.0
+        eps_hi = epsilon_upper_bound_approx(
+            noise_multiplier=hi,
+            sample_rate=sample_rate,
+            steps=steps,
+            delta=delta,
+        )
+        expand_guard += 1
+
+    if eps_hi > target_epsilon:
+        raise RuntimeError(
+            "Could not find finite noise multiplier for requested epsilon. "
+            "Try a larger epsilon, larger batch size, fewer epochs, or larger delta."
+        )
+
+    for _ in range(max_iter):
+        mid = 0.5 * (lo + hi)
+        eps_mid = epsilon_upper_bound_approx(
+            noise_multiplier=mid,
+            sample_rate=sample_rate,
+            steps=steps,
+            delta=delta,
+        )
+        if eps_mid <= target_epsilon:
+            hi = mid
+        else:
+            lo = mid
+        if abs(hi - lo) <= tol:
+            break
+
+    return float(hi)
+
+
+def _dp_noise_and_step(
+    params: List[torch.nn.Parameter],
+    optimizer: torch.optim.Optimizer,
+    accum_grads: List[torch.Tensor],
+    batch_size: int,
+    noise_multiplier: float,
+    max_grad_norm: float,
+) -> None:
+    optimizer.zero_grad(set_to_none=True)
+    noise_std = noise_multiplier * max_grad_norm
+    for j, p in enumerate(params):
+        noise = torch.randn_like(accum_grads[j]) * noise_std
+        p.grad = (accum_grads[j] + noise) / float(batch_size)
+    optimizer.step()
+
+
+def _dp_stage1_step(
+    model: StackedGRUThreeStagePredictor,
+    optimizer: torch.optim.Optimizer,
+    loss_fn: nn.Module,
+    bx: torch.Tensor,
+    by_cls: torch.Tensor,
+    ei_adj: torch.Tensor,
+    ei_od: torch.Tensor,
+    ei_od_t: torch.Tensor,
+    n_nodes: int,
+    max_grad_norm: float,
+    noise_multiplier: float,
+    device: torch.device,
+) -> float:
+    params = [p for p in model.parameters() if p.requires_grad]
+    accum_grads = [torch.zeros_like(p, device=device) for p in params]
+
+    bx = bx.to(device, non_blocking=True)
+    by_cls = by_cls.to(device, non_blocking=True)
+    bsz = bx.size(0)
+    total_loss = 0.0
+
+    bei_adj_1 = batch_edge_index(ei_adj, n_nodes, 1)
+    bei_od_1 = batch_edge_index(ei_od, n_nodes, 1)
+    bei_od_t_1 = batch_edge_index(ei_od_t, n_nodes, 1)
+
+    for i in range(bsz):
+        optimizer.zero_grad(set_to_none=True)
+        logits = model.forward_classifier(
+            bx[i : i + 1],
+            bei_adj_1,
+            bei_od_1,
+            bei_od_t_1,
+        )
+        loss = loss_fn(logits, by_cls[i : i + 1])
+        total_loss += float(loss.item())
+        loss.backward()
+
+        sq_norm = torch.zeros((), device=device)
+        for p in params:
+            if p.grad is not None:
+                sq_norm += p.grad.detach().pow(2).sum()
+        grad_norm = torch.sqrt(sq_norm + 1e-12)
+        clip_coef = (max_grad_norm / (grad_norm + 1e-12)).clamp(max=1.0)
+
+        for j, p in enumerate(params):
+            if p.grad is not None:
+                accum_grads[j].add_(p.grad.detach() * clip_coef)
+
+    _dp_noise_and_step(params, optimizer, accum_grads, bsz, noise_multiplier, max_grad_norm)
+    return total_loss / float(bsz)
+
+
+def _dp_stage_reg_step(
+    model: StackedGRUThreeStagePredictor,
+    optimizer: torch.optim.Optimizer,
+    bx: torch.Tensor,
+    by_reg: torch.Tensor,
+    ei_adj: torch.Tensor,
+    ei_od: torch.Tensor,
+    ei_od_t: torch.Tensor,
+    n_nodes: int,
+    max_grad_norm: float,
+    noise_multiplier: float,
+    device: torch.device,
+    *,
+    which: str,
+    mask_fn,
+) -> Tuple[float, float]:
+    params = [p for p in model.parameters() if p.requires_grad]
+    accum_grads = [torch.zeros_like(p, device=device) for p in params]
+
+    bx = bx.to(device, non_blocking=True)
+    by_reg = by_reg.to(device, non_blocking=True)
+    bsz = bx.size(0)
+    total_loss = 0.0
+    total_mask = 0.0
+
+    bei_adj_1 = batch_edge_index(ei_adj, n_nodes, 1)
+    bei_od_1 = batch_edge_index(ei_od, n_nodes, 1)
+    bei_od_t_1 = batch_edge_index(ei_od_t, n_nodes, 1)
+
+    huber = nn.HuberLoss(reduction="none", delta=2.0 if which == "delayed" else 1.0)
+
+    for i in range(bsz):
+        optimizer.zero_grad(set_to_none=True)
+        yi = by_reg[i : i + 1]
+        mask = mask_fn(yi)
+        mask_sum = float(mask.sum().item())
+        total_mask += mask_sum / float(mask.numel())
+        if mask_sum <= 0.0:
+            continue
+
+        preds = model.forward_regressor(
+            bx[i : i + 1],
+            bei_adj_1,
+            bei_od_1,
+            bei_od_t_1,
+            which=which,
+        )
+        per = huber(preds, yi) * mask
+        denom = mask.sum(dim=(0, 1)).clamp_min(1.0)
+        loss = (per.sum(dim=(0, 1)) / denom).mean()
+        total_loss += float(loss.item())
+        loss.backward()
+
+        sq_norm = torch.zeros((), device=device)
+        for p in params:
+            if p.grad is not None:
+                sq_norm += p.grad.detach().pow(2).sum()
+        grad_norm = torch.sqrt(sq_norm + 1e-12)
+        clip_coef = (max_grad_norm / (grad_norm + 1e-12)).clamp(max=1.0)
+
+        for j, p in enumerate(params):
+            if p.grad is not None:
+                accum_grads[j].add_(p.grad.detach() * clip_coef)
+
+    _dp_noise_and_step(params, optimizer, accum_grads, bsz, noise_multiplier, max_grad_norm)
+    return total_loss / float(max(1, bsz)), total_mask / float(max(1, bsz))
 
 
 class StackedGRUThreeStagePredictor(nn.Module):
@@ -172,6 +382,12 @@ def train_stage1(
     pos_weight: torch.Tensor,
     patience: int,
     class_threshold: float,
+    dp_enabled: bool,
+    noise_multiplier: float,
+    max_grad_norm: float,
+    target_delta: float,
+    sample_rate: float,
+    privacy_steps_offset: int,
 ) -> Tuple[List[Dict], float]:
     t0 = time.time()
     print("\n" + "=" * 80)
@@ -201,21 +417,38 @@ def train_stage1(
         train_losses: List[float] = []
 
         for bx, by_reg, by_cls in train_loader:
-            bx = bx.to(device, non_blocking=True)
-            by_cls = by_cls.to(device, non_blocking=True)
             bsz = bx.size(0)
-
             bei_adj = batch_edge_index(edge_index_adj, n_nodes, bsz)
             bei_od = batch_edge_index(edge_index_od, n_nodes, bsz)
             bei_od_t = batch_edge_index(edge_index_od_t, n_nodes, bsz)
 
-            optimizer.zero_grad(set_to_none=True)
-            logits = model.forward_classifier(bx, bei_adj, bei_od, bei_od_t)
-            loss = loss_fn(logits, by_cls)
-            loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
-            train_losses.append(float(loss.item()))
+            if dp_enabled:
+                loss = _dp_stage1_step(
+                    model,
+                    optimizer,
+                    loss_fn,
+                    bx,
+                    by_cls,
+                    edge_index_adj,
+                    edge_index_od,
+                    edge_index_od_t,
+                    n_nodes,
+                    max_grad_norm,
+                    noise_multiplier,
+                    device,
+                )
+            else:
+                bx = bx.to(device, non_blocking=True)
+                by_cls = by_cls.to(device, non_blocking=True)
+                optimizer.zero_grad(set_to_none=True)
+                logits = model.forward_classifier(bx, bei_adj, bei_od, bei_od_t)
+                loss_t = loss_fn(logits, by_cls)
+                loss_t.backward()
+                nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+                loss = float(loss_t.item())
+
+            train_losses.append(float(loss))
 
         model.eval()
         val_probs, val_targets = [], []
@@ -256,6 +489,12 @@ def train_stage1(
                 "val_recall": vm["recall"],
                 "val_accuracy": vm["accuracy"],
                 "epoch_time_seconds": ep_sec,
+                "epsilon_approx": epsilon_upper_bound_approx(
+                    noise_multiplier=noise_multiplier,
+                    sample_rate=sample_rate,
+                    steps=privacy_steps_offset + epoch * len(train_loader),
+                    delta=target_delta,
+                ) if dp_enabled else 0.0,
             }
         )
         print(
@@ -293,6 +532,12 @@ def train_stage2(
     scaler,
     delay_threshold: float,
     patience: int,
+    dp_enabled: bool,
+    noise_multiplier: float,
+    max_grad_norm: float,
+    target_delta: float,
+    sample_rate: float,
+    privacy_steps_offset: int,
 ) -> Tuple[List[Dict], float]:
     t0 = time.time()
     print("\n" + "=" * 80)
@@ -341,23 +586,46 @@ def train_stage2(
         tr_masks: List[float] = []
 
         for bx, by_reg, _ in train_loader:
-            bx = bx.to(device, non_blocking=True)
-            by_reg = by_reg.to(device, non_blocking=True)
             bsz = bx.size(0)
-
             bei_adj = batch_edge_index(edge_index_adj, n_nodes, bsz)
             bei_od = batch_edge_index(edge_index_od, n_nodes, bsz)
             bei_od_t = batch_edge_index(edge_index_od_t, n_nodes, bsz)
 
-            optimizer.zero_grad(set_to_none=True)
-            preds = model.forward_regressor(bx, bei_adj, bei_od, bei_od_t, which="delayed")
-            loss, mask = masked_loss(preds, by_reg)
-            loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
+            if dp_enabled:
+                def _mask_delayed(yi: torch.Tensor) -> torch.Tensor:
+                    thr = thr_scaled
+                    if thr.numel() == 1 and yi.shape[-1] > 1:
+                        thr = thr.expand(yi.shape[-1])
+                    return (yi > thr).float()
 
-            tr_losses.append(float(loss.item()))
-            tr_masks.append(_channel_stats(mask))
+                loss_val, mask_ratio = _dp_stage_reg_step(
+                    model,
+                    optimizer,
+                    bx,
+                    by_reg,
+                    edge_index_adj,
+                    edge_index_od,
+                    edge_index_od_t,
+                    n_nodes,
+                    max_grad_norm,
+                    noise_multiplier,
+                    device,
+                    which="delayed",
+                    mask_fn=_mask_delayed,
+                )
+                tr_losses.append(float(loss_val))
+                tr_masks.append(float(mask_ratio))
+            else:
+                bx = bx.to(device, non_blocking=True)
+                by_reg = by_reg.to(device, non_blocking=True)
+                optimizer.zero_grad(set_to_none=True)
+                preds = model.forward_regressor(bx, bei_adj, bei_od, bei_od_t, which="delayed")
+                loss, mask = masked_loss(preds, by_reg)
+                loss.backward()
+                nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+                tr_losses.append(float(loss.item()))
+                tr_masks.append(_channel_stats(mask))
 
         model.eval()
         va_losses: List[float] = []
@@ -394,6 +662,12 @@ def train_stage2(
                 "val_loss": va_loss,
                 "val_mask_ratio": va_mask,
                 "epoch_time_seconds": ep_sec,
+                "epsilon_approx": epsilon_upper_bound_approx(
+                    noise_multiplier=noise_multiplier,
+                    sample_rate=sample_rate,
+                    steps=privacy_steps_offset + epoch * len(train_loader),
+                    delta=target_delta,
+                ) if dp_enabled else 0.0,
             }
         )
         print(
@@ -429,6 +703,12 @@ def train_stage3(
     scaler,
     delay_threshold: float,
     patience: int,
+    dp_enabled: bool,
+    noise_multiplier: float,
+    max_grad_norm: float,
+    target_delta: float,
+    sample_rate: float,
+    privacy_steps_offset: int,
 ) -> Tuple[List[Dict], float]:
     t0 = time.time()
     print("\n" + "=" * 80)
@@ -474,30 +754,55 @@ def train_stage3(
         tr_masks: List[float] = []
 
         for bx, by_reg, _ in train_loader:
-            bx = bx.to(device, non_blocking=True)
-            by_reg = by_reg.to(device, non_blocking=True)
             bsz = bx.size(0)
 
-            mask = nondelayed_mask(by_reg)
-            if float(mask.sum().item()) <= 0.0:
-                continue
+            if dp_enabled:
+                def _mask_nondelayed(yi: torch.Tensor) -> torch.Tensor:
+                    if mean_t is None or std_t is None:
+                        yi_den = yi
+                    else:
+                        yi_den = yi * std_t + mean_t
+                    return (yi_den.abs() < float(delay_threshold)).float()
 
-            bei_adj = batch_edge_index(edge_index_adj, n_nodes, bsz)
-            bei_od = batch_edge_index(edge_index_od, n_nodes, bsz)
-            bei_od_t = batch_edge_index(edge_index_od_t, n_nodes, bsz)
+                loss_val, mask_ratio = _dp_stage_reg_step(
+                    model,
+                    optimizer,
+                    bx,
+                    by_reg,
+                    edge_index_adj,
+                    edge_index_od,
+                    edge_index_od_t,
+                    n_nodes,
+                    max_grad_norm,
+                    noise_multiplier,
+                    device,
+                    which="nondelayed",
+                    mask_fn=_mask_nondelayed,
+                )
+                tr_losses.append(float(loss_val))
+                tr_masks.append(float(mask_ratio))
+            else:
+                bx = bx.to(device, non_blocking=True)
+                by_reg = by_reg.to(device, non_blocking=True)
+                mask = nondelayed_mask(by_reg)
+                if float(mask.sum().item()) <= 0.0:
+                    continue
 
-            optimizer.zero_grad(set_to_none=True)
-            preds = model.forward_regressor(bx, bei_adj, bei_od, bei_od_t, which="nondelayed")
-            per = huber(preds, by_reg) * mask
-            denom = mask.sum(dim=(0, 1)).clamp_min(1.0)
-            loss_ch = per.sum(dim=(0, 1)) / denom
-            loss = loss_ch.mean()
-            loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
+                bei_adj = batch_edge_index(edge_index_adj, n_nodes, bsz)
+                bei_od = batch_edge_index(edge_index_od, n_nodes, bsz)
+                bei_od_t = batch_edge_index(edge_index_od_t, n_nodes, bsz)
 
-            tr_losses.append(float(loss.item()))
-            tr_masks.append(_channel_stats(mask))
+                optimizer.zero_grad(set_to_none=True)
+                preds = model.forward_regressor(bx, bei_adj, bei_od, bei_od_t, which="nondelayed")
+                per = huber(preds, by_reg) * mask
+                denom = mask.sum(dim=(0, 1)).clamp_min(1.0)
+                loss_ch = per.sum(dim=(0, 1)) / denom
+                loss = loss_ch.mean()
+                loss.backward()
+                nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+                tr_losses.append(float(loss.item()))
+                tr_masks.append(_channel_stats(mask))
 
         model.eval()
         va_losses: List[float] = []
@@ -540,6 +845,12 @@ def train_stage3(
                 "val_loss": va_loss,
                 "val_mask_ratio": va_mask,
                 "epoch_time_seconds": ep_sec,
+                "epsilon_approx": epsilon_upper_bound_approx(
+                    noise_multiplier=noise_multiplier,
+                    sample_rate=sample_rate,
+                    steps=privacy_steps_offset + epoch * len(train_loader),
+                    delta=target_delta,
+                ) if dp_enabled else 0.0,
             }
         )
         print(
@@ -576,6 +887,12 @@ def final_evaluation(
     stage1_time: float,
     stage2_time: float,
     stage3_time: float,
+    dp_enabled: bool,
+    epsilon_target: float,
+    epsilon_approx_final: float,
+    delta: float,
+    noise_multiplier: float,
+    max_grad_norm: float,
 ) -> None:
     model.eval()
     cls_probs, cls_targets = [], []
@@ -676,6 +993,12 @@ def final_evaluation(
         w.writerow(["stage2_time_seconds", f"{stage2_time:.2f}"])
         w.writerow(["stage3_time_seconds", f"{stage3_time:.2f}"])
         w.writerow(["total_time_seconds", f"{(stage1_time + stage2_time + stage3_time):.2f}"])
+        w.writerow(["dp_enabled", int(dp_enabled)])
+        w.writerow(["epsilon_target", f"{epsilon_target:.6f}"])
+        w.writerow(["epsilon_approx_final", f"{epsilon_approx_final:.6f}"])
+        w.writerow(["delta", f"{delta:.12f}"])
+        w.writerow(["noise_multiplier", f"{noise_multiplier:.6f}"])
+        w.writerow(["max_grad_norm", f"{max_grad_norm:.6f}"])
 
     print(f"Saved: {model_path}")
     print(f"Saved: {hist_path}")
@@ -711,6 +1034,17 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--stage2_lr", type=float, default=None)
     p.add_argument("--stage3_lr", type=float, default=None)
     p.add_argument("--patience", type=int, default=5)
+
+    p.add_argument("--dp", action="store_true", help="Enable manual DP-SGD for stage training")
+    p.add_argument("--epsilon", type=float, default=7.5)
+    p.add_argument("--delta", type=float, default=1e-5)
+    p.add_argument("--max_grad_norm", type=float, default=1.0)
+    p.add_argument(
+        "--noise_multiplier",
+        type=float,
+        default=None,
+        help="Manual sigma override; if unset and --dp is on, solved from epsilon",
+    )
 
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--device", type=str, default="auto")
@@ -851,6 +1185,37 @@ def main() -> None:
     pos_rate = trY_cls.reshape(-1, delay_dim).mean(dim=0)
     pos_weight = (1.0 - pos_rate + 1e-6) / (pos_rate + 1e-6)
 
+    steps_per_stage = len(train_loader)
+    total_steps = (args.stage1_epochs + args.stage2_epochs + args.stage3_epochs) * steps_per_stage
+    sample_rate = args.batch_size / max(1, len(train_loader.dataset))
+
+    if args.dp:
+        if args.noise_multiplier is None:
+            sigma = solve_noise_multiplier_for_epsilon(
+                target_epsilon=args.epsilon,
+                delta=args.delta,
+                sample_rate=sample_rate,
+                steps=total_steps,
+            )
+        else:
+            sigma = float(args.noise_multiplier)
+
+        epsilon_final = epsilon_upper_bound_approx(
+            noise_multiplier=sigma,
+            sample_rate=sample_rate,
+            steps=total_steps,
+            delta=args.delta,
+        )
+        print("[DP] Enabled")
+        print(f"  target epsilon={args.epsilon:.4f}, delta={args.delta:.1e}")
+        print(f"  sample_rate={sample_rate:.6f}, total_steps={total_steps}")
+        print(f"  noise_multiplier(sigma)={sigma:.6f}")
+        print(f"  approx epsilon upper bound={epsilon_final:.4f}")
+    else:
+        sigma = 0.0
+        epsilon_final = 0.0
+        print("[DP] Disabled")
+
     model = StackedGRUThreeStagePredictor(
         c_in=feature_dim,
         c_out=delay_dim,
@@ -890,6 +1255,12 @@ def main() -> None:
         pos_weight,
         args.patience,
         args.class_threshold,
+        args.dp,
+        sigma,
+        args.max_grad_norm,
+        args.delta,
+        sample_rate,
+        0,
     )
 
     h2, t2 = train_stage2(
@@ -907,6 +1278,12 @@ def main() -> None:
         scaler,
         args.delay_threshold,
         args.patience,
+        args.dp,
+        sigma,
+        args.max_grad_norm,
+        args.delta,
+        sample_rate,
+        args.stage1_epochs * steps_per_stage,
     )
 
     h3, t3 = train_stage3(
@@ -924,6 +1301,12 @@ def main() -> None:
         scaler,
         args.delay_threshold,
         args.patience,
+        args.dp,
+        sigma,
+        args.max_grad_norm,
+        args.delta,
+        sample_rate,
+        (args.stage1_epochs + args.stage2_epochs) * steps_per_stage,
     )
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -946,6 +1329,12 @@ def main() -> None:
         t1,
         t2,
         t3,
+        args.dp,
+        float(args.epsilon),
+        float(epsilon_final),
+        float(args.delta),
+        float(sigma),
+        float(args.max_grad_norm),
     )
 
 

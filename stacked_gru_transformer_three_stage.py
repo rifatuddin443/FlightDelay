@@ -6,7 +6,7 @@ import math
 import os
 import time
 from datetime import datetime
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -536,6 +536,51 @@ def _apply_regressor(regressor: nn.Module, features: torch.Tensor) -> torch.Tens
     return regressor(features)
 
 
+def save_training_checkpoint(
+    checkpoint_dir: str,
+    stage: int,
+    epoch: int,
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    history_stage1: List[Dict],
+    history_stage2: List[Dict],
+    history_stage3: List[Dict],
+    stage1_time: float,
+    stage2_time: float,
+    stage3_time: float,
+    sigma: float,
+    epsilon_final: float,
+    save_every: int = 1,
+) -> None:
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    payload = {
+        "stage": int(stage),
+        "epoch": int(epoch),
+        "model_state": model.state_dict(),
+        "optimizer_state": optimizer.state_dict(),
+        "history_stage1": history_stage1,
+        "history_stage2": history_stage2,
+        "history_stage3": history_stage3,
+        "stage1_time": float(stage1_time),
+        "stage2_time": float(stage2_time),
+        "stage3_time": float(stage3_time),
+        "sigma": float(sigma),
+        "epsilon_final": float(epsilon_final),
+        "saved_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+    latest_path = os.path.join(checkpoint_dir, "latest_checkpoint.pt")
+    torch.save(payload, latest_path)
+
+    if save_every > 0 and (epoch % save_every == 0):
+        snap_path = os.path.join(checkpoint_dir, f"checkpoint_stage{stage}_epoch{epoch}.pt")
+        torch.save(payload, snap_path)
+
+
+def load_training_checkpoint(path: str, device: torch.device) -> Dict:
+    return torch.load(path, map_location=device)
+
+
 def train_stage1(
     model: StackedGRUThreeStagePredictor,
     optimizer: torch.optim.Optimizer,
@@ -561,6 +606,10 @@ def train_stage1(
     max_train_batches: int,
     max_val_batches: int,
     effective_train_steps: int,
+    start_epoch: int = 1,
+    history_init: Optional[List[Dict]] = None,
+    stage_time_offset: float = 0.0,
+    checkpoint_callback: Optional[Callable[[int, List[Dict], float], None]] = None,
 ) -> Tuple[List[Dict], float]:
     t0 = time.time()
     print("\n" + "=" * 80)
@@ -580,13 +629,13 @@ def train_stage1(
     loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight.to(device))
     early_stopping = EarlyStopping(patience=patience, mode="max")
 
-    history: List[Dict] = []
+    history: List[Dict] = list(history_init) if history_init is not None else []
     best_f1 = -1.0
     best_state = None
     edge_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = {}
     scaler = GradScaler(enabled=(use_amp and not dp_enabled))
 
-    for epoch in range(1, epochs + 1):
+    for epoch in range(start_epoch, epochs + 1):
         ep_t0 = time.time()
         model.train()
         train_losses: List[float] = []
@@ -691,6 +740,9 @@ def train_stage1(
             f"(arr={vm['f1_arrival']:.4f}, dep={vm['f1_departure']:.4f}) | sec={ep_sec:.1f}"
         )
 
+        if checkpoint_callback is not None:
+            checkpoint_callback(epoch, list(history), stage_time_offset + (time.time() - t0))
+
         if early_stopping(vm["f1"], epoch):
             print(f"  Early stopping at epoch {epoch}")
             break
@@ -703,7 +755,7 @@ def train_stage1(
     _set_requires_grad(model.regressor_delayed, True)
     _set_requires_grad(model.regressor_nondelayed, True)
 
-    return history, time.time() - t0
+    return history, stage_time_offset + (time.time() - t0)
 
 
 def train_stage2(
@@ -733,6 +785,10 @@ def train_stage2(
     max_train_batches: int,
     max_val_batches: int,
     effective_train_steps: int,
+    start_epoch: int = 1,
+    history_init: Optional[List[Dict]] = None,
+    stage_time_offset: float = 0.0,
+    checkpoint_callback: Optional[Callable[[int, List[Dict], float], None]] = None,
 ) -> Tuple[List[Dict], float]:
     t0 = time.time()
     print("\n" + "=" * 80)
@@ -770,7 +826,7 @@ def train_stage2(
         loss_ch = per.sum(dim=(0, 1)) / denom
         return loss_ch.mean(), mask
 
-    history: List[Dict] = []
+    history: List[Dict] = list(history_init) if history_init is not None else []
     best_val = float("inf")
     best_state = None
     edge_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = {}
@@ -811,7 +867,7 @@ def train_stage2(
         feature_train_loader = DataLoader(train_feat_ds, batch_size=train_loader.batch_size, shuffle=True, drop_last=True, **loader_kwargs)
         feature_val_loader = DataLoader(val_feat_ds, batch_size=val_loader.batch_size, shuffle=False, drop_last=False, **loader_kwargs)
 
-    for epoch in range(1, epochs + 1):
+    for epoch in range(start_epoch, epochs + 1):
         ep_t0 = time.time()
         model.train()
         tr_losses: List[float] = []
@@ -969,6 +1025,9 @@ def train_stage2(
             f"mask={tr_mask*100:.1f}% (val {va_mask*100:.1f}%) | sec={ep_sec:.1f}"
         )
 
+        if checkpoint_callback is not None:
+            checkpoint_callback(epoch, list(history), stage_time_offset + (time.time() - t0))
+
         if early_stopping(va_loss, epoch):
             print(f"  Early stopping at epoch {epoch}")
             break
@@ -979,7 +1038,7 @@ def train_stage2(
     for p in model.parameters():
         p.requires_grad = True
 
-    return history, time.time() - t0
+    return history, stage_time_offset + (time.time() - t0)
 
 
 def train_stage3(
@@ -1009,6 +1068,10 @@ def train_stage3(
     max_train_batches: int,
     max_val_batches: int,
     effective_train_steps: int,
+    start_epoch: int = 1,
+    history_init: Optional[List[Dict]] = None,
+    stage_time_offset: float = 0.0,
+    checkpoint_callback: Optional[Callable[[int, List[Dict], float], None]] = None,
 ) -> Tuple[List[Dict], float]:
     t0 = time.time()
     print("\n" + "=" * 80)
@@ -1043,7 +1106,7 @@ def train_stage3(
             targets_denorm = targets_scaled * std_t + mean_t
         return (targets_denorm.abs() < float(delay_threshold)).float()
 
-    history: List[Dict] = []
+    history: List[Dict] = list(history_init) if history_init is not None else []
     best_val = float("inf")
     best_state = None
     edge_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = {}
@@ -1084,7 +1147,7 @@ def train_stage3(
         feature_train_loader = DataLoader(train_feat_ds, batch_size=train_loader.batch_size, shuffle=True, drop_last=True, **loader_kwargs)
         feature_val_loader = DataLoader(val_feat_ds, batch_size=val_loader.batch_size, shuffle=False, drop_last=False, **loader_kwargs)
 
-    for epoch in range(1, epochs + 1):
+    for epoch in range(start_epoch, epochs + 1):
         ep_t0 = time.time()
         model.train()
         tr_losses: List[float] = []
@@ -1257,6 +1320,9 @@ def train_stage3(
             f"mask={tr_mask*100:.1f}% (val {va_mask*100:.1f}%) | sec={ep_sec:.1f}"
         )
 
+        if checkpoint_callback is not None:
+            checkpoint_callback(epoch, list(history), stage_time_offset + (time.time() - t0))
+
         if early_stopping(va_loss, epoch):
             print(f"  Early stopping at epoch {epoch}")
             break
@@ -1267,7 +1333,7 @@ def train_stage3(
     for p in model.parameters():
         p.requires_grad = True
 
-    return history, time.time() - t0
+    return history, stage_time_offset + (time.time() - t0)
 
 
 def final_evaluation(
@@ -1433,16 +1499,16 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--regressor",
         type=str,
-        default="mlp",
+        default="tsit",
         choices=["mlp", "deep_mlp", "residual_mlp", "gru", "tsit", "convtran"],
         help="Regressor head used for delayed/non-delayed stages",
     )
     p.add_argument("--dropout", type=float, default=0.15)
     p.add_argument("--chunk_size", type=int, default=200)
 
-    p.add_argument("--stage1_epochs", type=int, default=1)
-    p.add_argument("--stage2_epochs", type=int, default=1)
-    p.add_argument("--stage3_epochs", type=int, default=1)
+    p.add_argument("--stage1_epochs", type=int, default=15)
+    p.add_argument("--stage2_epochs", type=int, default=15)
+    p.add_argument("--stage3_epochs", type=int, default=15)
     p.add_argument("--batch_size", type=int, default=128)
     p.add_argument("--lr", type=float, default=5e-4)
     p.add_argument("--stage1_lr", type=float, default=None)
@@ -1469,10 +1535,14 @@ def parse_args() -> argparse.Namespace:
         "--no_cache_stage23_features",
         action="store_true",
         help="Disable feature caching for stage 2/3 (slower, but lower host RAM usage)",
+        default=True,
     )
     p.add_argument("--max_train_batches", type=int, default=0, help="Limit train batches per epoch for quick benchmarks (0=all)")
     p.add_argument("--max_val_batches", type=int, default=0, help="Limit val batches per epoch for quick benchmarks (0=all)")
     p.add_argument("--max_test_batches", type=int, default=0, help="Limit test batches for quick benchmarks (0=all)")
+    p.add_argument("--checkpoint_dir", type=str, default="", help="Directory for progress checkpoints (e.g., /content/drive/MyDrive/...) ")
+    p.add_argument("--resume_checkpoint", type=str, default="", help="Path to a saved checkpoint .pt file to resume training")
+    p.add_argument("--checkpoint_every", type=int, default=1, help="Save a numbered checkpoint every N epochs (latest is always updated)")
     p.add_argument("--output_dir", type=str, default="auto")
     return p.parse_args()
 
@@ -1670,6 +1740,63 @@ def main() -> None:
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
 
+    history_state = {
+        "h1": [],
+        "h2": [],
+        "h3": [],
+        "t1": 0.0,
+        "t2": 0.0,
+        "t3": 0.0,
+    }
+    resume_stage = 1
+    resume_epoch = 0
+
+    if args.resume_checkpoint:
+        if not os.path.isfile(args.resume_checkpoint):
+            raise FileNotFoundError(f"Checkpoint not found: {args.resume_checkpoint}")
+        ckpt = load_training_checkpoint(args.resume_checkpoint, device)
+        model.load_state_dict(ckpt["model_state"])
+        optimizer.load_state_dict(ckpt["optimizer_state"])
+        resume_stage = int(ckpt.get("stage", 1))
+        resume_epoch = int(ckpt.get("epoch", 0))
+        history_state["h1"] = list(ckpt.get("history_stage1", []))
+        history_state["h2"] = list(ckpt.get("history_stage2", []))
+        history_state["h3"] = list(ckpt.get("history_stage3", []))
+        history_state["t1"] = float(ckpt.get("stage1_time", 0.0))
+        history_state["t2"] = float(ckpt.get("stage2_time", 0.0))
+        history_state["t3"] = float(ckpt.get("stage3_time", 0.0))
+        if args.dp:
+            sigma = float(ckpt.get("sigma", sigma))
+            epsilon_final = float(ckpt.get("epsilon_final", epsilon_final))
+        print(f"[RESUME] Loaded checkpoint: stage={resume_stage}, epoch={resume_epoch}")
+
+    checkpoint_dir = args.checkpoint_dir.strip()
+    if (not checkpoint_dir) and args.resume_checkpoint:
+        checkpoint_dir = os.path.dirname(args.resume_checkpoint)
+    if checkpoint_dir:
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        print(f"[CHECKPOINT] Saving to: {checkpoint_dir}")
+
+    def _write_checkpoint(stage: int, epoch: int) -> None:
+        if not checkpoint_dir:
+            return
+        save_training_checkpoint(
+            checkpoint_dir=checkpoint_dir,
+            stage=stage,
+            epoch=epoch,
+            model=model,
+            optimizer=optimizer,
+            history_stage1=history_state["h1"],
+            history_stage2=history_state["h2"],
+            history_stage3=history_state["h3"],
+            stage1_time=history_state["t1"],
+            stage2_time=history_state["t2"],
+            stage3_time=history_state["t3"],
+            sigma=sigma,
+            epsilon_final=epsilon_final,
+            save_every=max(1, int(args.checkpoint_every)),
+        )
+
     s1_lr = args.stage1_lr if args.stage1_lr is not None else args.lr
     s2_lr = args.stage2_lr if args.stage2_lr is not None else args.lr
     s3_lr = args.stage3_lr if args.stage3_lr is not None else (args.lr * 0.2)
@@ -1678,90 +1805,141 @@ def main() -> None:
     ei_od = edge_index_od.to(device)
     ei_od_t = edge_index_od_t.to(device)
 
-    h1, t1 = train_stage1(
-        model,
-        optimizer,
-        train_loader,
-        val_loader,
-        ei_adj,
-        ei_od,
-        ei_od_t,
-        n_nodes,
-        device,
-        args.stage1_epochs,
-        s1_lr,
-        pos_weight,
-        args.patience,
-        args.class_threshold,
-        args.dp,
-        sigma,
-        args.max_grad_norm,
-        args.delta,
-        sample_rate,
-        0,
-        use_amp,
-        args.max_train_batches,
-        args.max_val_batches,
-        effective_train_steps,
-    )
+    stage1_done = (resume_stage > 1) or (resume_stage == 1 and resume_epoch >= args.stage1_epochs)
+    if stage1_done:
+        h1, t1 = history_state["h1"], history_state["t1"]
+        print("[RESUME] Stage 1 already complete; skipping.")
+    else:
+        s1_start = (resume_epoch + 1) if resume_stage == 1 else 1
 
-    h2, t2 = train_stage2(
-        model,
-        optimizer,
-        train_loader,
-        val_loader,
-        ei_adj,
-        ei_od,
-        ei_od_t,
-        n_nodes,
-        device,
-        args.stage2_epochs,
-        s2_lr,
-        scaler,
-        args.delay_threshold,
-        args.patience,
-        args.dp,
-        sigma,
-        args.max_grad_norm,
-        args.delta,
-        sample_rate,
-        args.stage1_epochs * steps_per_stage,
-        use_amp,
-        cache_stage23_features,
-        worker_count,
-        args.max_train_batches,
-        args.max_val_batches,
-        effective_train_steps,
-    )
+        def _s1_ckpt(ep: int, hist: List[Dict], elapsed: float) -> None:
+            history_state["h1"] = hist
+            history_state["t1"] = elapsed
+            _write_checkpoint(1, ep)
 
-    h3, t3 = train_stage3(
-        model,
-        optimizer,
-        train_loader,
-        val_loader,
-        ei_adj,
-        ei_od,
-        ei_od_t,
-        n_nodes,
-        device,
-        args.stage3_epochs,
-        s3_lr,
-        scaler,
-        args.delay_threshold,
-        args.patience,
-        args.dp,
-        sigma,
-        args.max_grad_norm,
-        args.delta,
-        sample_rate,
-        (args.stage1_epochs + args.stage2_epochs) * steps_per_stage,
-        use_amp,
-        cache_stage23_features,
-        worker_count,
-        args.max_train_batches,
-        args.max_val_batches,
-        effective_train_steps,
-    )
+        h1, t1 = train_stage1(
+            model,
+            optimizer,
+            train_loader,
+            val_loader,
+            ei_adj,
+            ei_od,
+            ei_od_t,
+            n_nodes,
+            device,
+            args.stage1_epochs,
+            s1_lr,
+            pos_weight,
+            args.patience,
+            args.class_threshold,
+            args.dp,
+            sigma,
+            args.max_grad_norm,
+            args.delta,
+            sample_rate,
+            0,
+            use_amp,
+            args.max_train_batches,
+            args.max_val_batches,
+            effective_train_steps,
+            start_epoch=s1_start,
+            history_init=history_state["h1"],
+            stage_time_offset=history_state["t1"],
+            checkpoint_callback=_s1_ckpt,
+        )
+        history_state["h1"], history_state["t1"] = h1, t1
+
+    stage2_done = (resume_stage > 2) or (resume_stage == 2 and resume_epoch >= args.stage2_epochs)
+    if stage2_done:
+        h2, t2 = history_state["h2"], history_state["t2"]
+        print("[RESUME] Stage 2 already complete; skipping.")
+    else:
+        s2_start = (resume_epoch + 1) if resume_stage == 2 else 1
+
+        def _s2_ckpt(ep: int, hist: List[Dict], elapsed: float) -> None:
+            history_state["h2"] = hist
+            history_state["t2"] = elapsed
+            _write_checkpoint(2, ep)
+
+        h2, t2 = train_stage2(
+            model,
+            optimizer,
+            train_loader,
+            val_loader,
+            ei_adj,
+            ei_od,
+            ei_od_t,
+            n_nodes,
+            device,
+            args.stage2_epochs,
+            s2_lr,
+            scaler,
+            args.delay_threshold,
+            args.patience,
+            args.dp,
+            sigma,
+            args.max_grad_norm,
+            args.delta,
+            sample_rate,
+            args.stage1_epochs * steps_per_stage,
+            use_amp,
+            cache_stage23_features,
+            worker_count,
+            args.max_train_batches,
+            args.max_val_batches,
+            effective_train_steps,
+            start_epoch=s2_start,
+            history_init=history_state["h2"],
+            stage_time_offset=history_state["t2"],
+            checkpoint_callback=_s2_ckpt,
+        )
+        history_state["h2"], history_state["t2"] = h2, t2
+
+    stage3_done = (resume_stage > 3) or (resume_stage == 3 and resume_epoch >= args.stage3_epochs)
+    if stage3_done:
+        h3, t3 = history_state["h3"], history_state["t3"]
+        print("[RESUME] Stage 3 already complete; skipping.")
+    else:
+        s3_start = (resume_epoch + 1) if resume_stage == 3 else 1
+
+        def _s3_ckpt(ep: int, hist: List[Dict], elapsed: float) -> None:
+            history_state["h3"] = hist
+            history_state["t3"] = elapsed
+            _write_checkpoint(3, ep)
+
+        h3, t3 = train_stage3(
+            model,
+            optimizer,
+            train_loader,
+            val_loader,
+            ei_adj,
+            ei_od,
+            ei_od_t,
+            n_nodes,
+            device,
+            args.stage3_epochs,
+            s3_lr,
+            scaler,
+            args.delay_threshold,
+            args.patience,
+            args.dp,
+            sigma,
+            args.max_grad_norm,
+            args.delta,
+            sample_rate,
+            (args.stage1_epochs + args.stage2_epochs) * steps_per_stage,
+            use_amp,
+            cache_stage23_features,
+            worker_count,
+            args.max_train_batches,
+            args.max_val_batches,
+            effective_train_steps,
+            start_epoch=s3_start,
+            history_init=history_state["h3"],
+            stage_time_offset=history_state["t3"],
+            checkpoint_callback=_s3_ckpt,
+        )
+        history_state["h3"], history_state["t3"] = h3, t3
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = args.output_dir if args.output_dir != "auto" else f"stacked_gru_three_stage_{ts}"

@@ -335,7 +335,7 @@ def _dp_stage_reg_step(
         if mask_sum <= 0.0:
             continue
 
-        preds = regressor(feat_batch[i : i + 1])
+        preds = _apply_regressor(regressor, feat_batch[i : i + 1])
         per = huber(preds, yi) * mask
         denom = mask.sum(dim=(0, 1)).clamp_min(1.0)
         loss = (per.sum(dim=(0, 1)) / denom).mean()
@@ -520,6 +520,20 @@ def _iter_limited(loader: DataLoader, max_batches: int):
         if idx >= max_batches:
             break
         yield batch
+
+
+def _apply_regressor(regressor: nn.Module, features: torch.Tensor) -> torch.Tensor:
+    """Apply regressor to pooled [B,N,F] or sequence [B,N,F,T] features."""
+    if features.dim() == 4:
+        bsz, n_nodes, feat_dim, seq_len = features.shape
+        flat = features.view(bsz * n_nodes, feat_dim, seq_len)
+        out = regressor(flat)
+        if isinstance(out, (tuple, list)):
+            out = out[0]
+        if out.dim() > 2:
+            out = out.flatten(1)
+        return out.view(bsz, n_nodes, -1)
+    return regressor(features)
 
 
 def train_stage1(
@@ -878,7 +892,7 @@ def train_stage2(
                             feat_batch = model._extract_pooled_features(bx, bei_adj, bei_od, bei_od_t)
                 optimizer.zero_grad(set_to_none=True)
                 with autocast(enabled=use_amp):
-                    preds = model.regressor_delayed(feat_batch)
+                    preds = _apply_regressor(model.regressor_delayed, feat_batch)
                     loss, mask = masked_loss(preds, by_reg)
                 scaler_amp.scale(loss).backward()
                 scaler_amp.unscale_(optimizer)
@@ -918,7 +932,7 @@ def train_stage2(
                         else:
                             feat_batch = model._extract_pooled_features(bx, bei_adj, bei_od, bei_od_t)
                 with autocast(enabled=use_amp):
-                    preds = model.regressor_delayed(feat_batch)
+                    preds = _apply_regressor(model.regressor_delayed, feat_batch)
                     loss, mask = masked_loss(preds, by_reg)
                 va_losses.append(float(loss.item()))
                 va_masks.append(_channel_stats(mask))
@@ -1157,7 +1171,7 @@ def train_stage3(
 
                 optimizer.zero_grad(set_to_none=True)
                 with autocast(enabled=use_amp):
-                    preds = model.regressor_nondelayed(feat_batch)
+                    preds = _apply_regressor(model.regressor_nondelayed, feat_batch)
                     per = huber(preds, by_reg) * mask
                     denom = mask.sum(dim=(0, 1)).clamp_min(1.0)
                     loss_ch = per.sum(dim=(0, 1)) / denom
@@ -1203,7 +1217,7 @@ def train_stage3(
                 if float(mask.sum().item()) <= 0.0:
                     continue
                 with autocast(enabled=use_amp):
-                    preds = model.regressor_nondelayed(feat_batch)
+                    preds = _apply_regressor(model.regressor_nondelayed, feat_batch)
                     per = huber(preds, by_reg) * mask
                     denom = mask.sum(dim=(0, 1)).clamp_min(1.0)
                     loss_ch = per.sum(dim=(0, 1)) / denom
@@ -1426,9 +1440,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dropout", type=float, default=0.15)
     p.add_argument("--chunk_size", type=int, default=200)
 
-    p.add_argument("--stage1_epochs", type=int, default=10)
-    p.add_argument("--stage2_epochs", type=int, default=10)
-    p.add_argument("--stage3_epochs", type=int, default=14)
+    p.add_argument("--stage1_epochs", type=int, default=1)
+    p.add_argument("--stage2_epochs", type=int, default=1)
+    p.add_argument("--stage3_epochs", type=int, default=1)
     p.add_argument("--batch_size", type=int, default=128)
     p.add_argument("--lr", type=float, default=5e-4)
     p.add_argument("--stage1_lr", type=float, default=None)

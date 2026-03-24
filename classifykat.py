@@ -80,7 +80,8 @@ class EarlyStopping:
             self.counter += 1
             if self.counter >= self.patience:
                 self.early_stop = True
-                print(f"\n⏹️  Early stopping triggered! No improvement for {self.patience} epochs.")
+                # Avoid Unicode issues on Windows consoles with legacy encodings.
+                print(f"\n[EarlyStopping] Triggered: no improvement for {self.patience} epochs.")
                 print(f"   Best score: {self.best_score:.4f} at epoch {self.best_epoch}")
                 return True
         return False

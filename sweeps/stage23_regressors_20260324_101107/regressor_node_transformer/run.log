@@ -1,0 +1,22 @@
+COMMAND:
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\python.exe D:\flight delay\stpn paper\STPN-main\stacked_gru_transformer_three_stage.py --resume_checkpoint D:\flight delay\stpn paper\STPN-main\checkpoints\stacked_gru_three_stage_20260324_003536\checkpoint_stage1_epoch6.pt --start_stage 2 --regressor node_transformer --output_dir D:\flight delay\stpn paper\STPN-main\sweeps\stage23_regressors_20260324_101107\regressor_node_transformer
+
+
+================================================================================
+THREE-STAGE STACKED GRU + TRANSFORMER TRAINING
+================================================================================
+Device: cuda
+
+Node-level balance: 23.33% delayed 
+
+Node-level balance: 17.16% delayed 
+
+Node-level balance: 24.22% delayed 
+[DATA] train_samples=19197 | val_samples=2717 | test_samples=5464 | batch_size=128 | train_batches=149 | val_batches=22 | test_batches=43 | max_train_batches=0 | max_val_batches=0 | effective_train_steps/epoch=149
+forrtl: error (200): program aborting due to window-CLOSE event
+Image              PC                Routine            Line        Source             
+KERNELBASE.dll     00007FFA75B53867  Unknown               Unknown  Unknown
+KERNEL32.DLL       00007FFA7728259D  Unknown               Unknown  Unknown
+ntdll.dll          00007FFA7880AF78  Unknown               Unknown  Unknown
+QObject::killTimer: Timers cannot be stopped from another thread
+QObject::~QObject: Timers cannot be stopped from another thread

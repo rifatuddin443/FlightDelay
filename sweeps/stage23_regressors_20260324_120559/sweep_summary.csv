@@ -1,0 +1,5 @@
+rank,regressor,regression_mae_overall,out_dir,returncode
+,nbeats,,D:\flight delay\stpn paper\STPN-main\sweeps\stage23_regressors_20260324_120559\regressor_nbeats,3221225477
+,node_transformer,,D:\flight delay\stpn paper\STPN-main\sweeps\stage23_regressors_20260324_120559\regressor_node_transformer,3221225477
+,tft,,D:\flight delay\stpn paper\STPN-main\sweeps\stage23_regressors_20260324_120559\regressor_tft,3221225477
+,graph_gat,,D:\flight delay\stpn paper\STPN-main\sweeps\stage23_regressors_20260324_120559\regressor_graph_gat,3221225477

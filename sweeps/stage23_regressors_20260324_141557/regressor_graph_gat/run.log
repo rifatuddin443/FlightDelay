@@ -1,0 +1,55 @@
+COMMAND:
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\python.exe -u D:\flight delay\stpn paper\STPN-main\stacked_gru_transformer_three_stage.py --resume_checkpoint D:\flight delay\stpn paper\STPN-main\checkpoints\stacked_gru_three_stage_20260324_003536\checkpoint_stage1_epoch6.pt --checkpoint_dir D:\flight delay\stpn paper\STPN-main\sweeps\stage23_regressors_20260324_141557\regressor_graph_gat\checkpoints --start_stage 2 --regressor graph_gat --output_dir D:\flight delay\stpn paper\STPN-main\sweeps\stage23_regressors_20260324_141557\regressor_graph_gat
+
+
+================================================================================
+THREE-STAGE STACKED GRU + TRANSFORMER TRAINING
+================================================================================
+Device: cuda
+
+Node-level balance: 23.33% delayed 
+
+Node-level balance: 17.16% delayed 
+
+Node-level balance: 24.22% delayed 
+[DATA] train_samples=19197 | val_samples=2717 | test_samples=5464 | batch_size=128 | train_batches=149 | val_batches=22 | test_batches=43 | max_train_batches=0 | max_val_batches=0 | effective_train_steps/epoch=149
+[DP] Enabled
+  target epsilon=7.5000, delta=1.0e-05
+  sample_rate=0.006668, total_steps=8940
+  noise_multiplier(sigma)=0.507862
+  approx epsilon upper bound=7.4977
+[PERF] AMP=on | cache_stage23_features=off | compile=off | fused_adamw=off
+[MODEL] classifier=TSiTPlus | regressor=graph_gat
+[RESUME] Loaded partial checkpoint state: stage=1, epoch=6, matched_tensors=163, skipped_tensors=20
+[RESUME] Reinitialized optimizer because checkpoint architecture does not fully match current model.
+[RESUME] Checkpoint metadata: stage=1, epoch=6
+[RESUME] Forcing start at stage=2 (skipping stages < 2).
+[CHECKPOINT] Saving to: D:\flight delay\stpn paper\STPN-main\sweeps\stage23_regressors_20260324_141557\regressor_graph_gat\checkpoints
+[RESUME] Stage 1 already complete; skipping.
+
+================================================================================
+STAGE 2: DELAYED REGRESSOR
+================================================================================
+Epoch 1/20 | train_loss=0.1661 | val_loss=0.1667 | mask=23.3% (val 16.9%) | sec=293.4
+Epoch 2/20 | train_loss=0.1432 | val_loss=0.1647 | mask=23.3% (val 16.9%) | sec=292.8
+Epoch 3/20 | train_loss=0.1408 | val_loss=0.1647 | mask=23.3% (val 16.9%) | sec=295.8
+Epoch 4/20 | train_loss=0.1397 | val_loss=0.1637 | mask=23.3% (val 16.9%) | sec=296.7
+Epoch 5/20 | train_loss=0.1386 | val_loss=0.1638 | mask=23.3% (val 16.9%) | sec=293.5
+Epoch 6/20 | train_loss=0.1382 | val_loss=0.1633 | mask=23.3% (val 16.9%) | sec=291.4
+Epoch 7/20 | train_loss=0.1378 | val_loss=0.1650 | mask=23.3% (val 16.9%) | sec=291.9
+Epoch 8/20 | train_loss=0.1372 | val_loss=0.1631 | mask=23.3% (val 16.9%) | sec=292.4
+Epoch 9/20 | train_loss=0.1368 | val_loss=0.1641 | mask=23.3% (val 16.9%) | sec=299.9
+Epoch 10/20 | train_loss=0.1365 | val_loss=0.1641 | mask=23.3% (val 16.9%) | sec=295.1
+Epoch 11/20 | train_loss=0.1362 | val_loss=0.1646 | mask=23.3% (val 16.9%) | sec=297.6
+Epoch 12/20 | train_loss=0.1360 | val_loss=0.1644 | mask=23.3% (val 16.9%) | sec=288.8
+Epoch 13/20 | train_loss=0.1357 | val_loss=0.1646 | mask=23.3% (val 16.9%) | sec=291.8
+Epoch 14/20 | train_loss=0.1356 | val_loss=0.1651 | mask=23.3% (val 16.9%) | sec=294.4
+
+[EarlyStopping] Triggered: no improvement for 6 epochs.
+   Best score: 0.1631 at epoch 8
+  Early stopping at epoch 14
+
+================================================================================
+STAGE 3: NON-DELAYED REGRESSOR
+================================================================================
+forrtl: error (200): program aborting due to window-CLOSE event

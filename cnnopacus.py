@@ -1272,7 +1272,7 @@ def final_evaluation(
                 threshold=delay_threshold,
                 save_path=f"{run_tag}_{artifact_prefix}_classification_results_{timestamp}.png",
             )
-            print("  ✓ Classification results visualization saved")
+            print("  [OK] Classification results visualization saved")
 
             visualize_regression_timeseries(
                 targets_denorm,
@@ -1282,21 +1282,21 @@ def final_evaluation(
                 ylabel="Delay (minutes)",
                 save_path=f"{run_tag}_{artifact_prefix}_regression_timeseries_{timestamp}.png",
             )
-            print("  ✓ Regression time-series visualization saved")
+            print("  [OK] Regression time-series visualization saved")
         except Exception as e:
-            print(f"  ✗ Error generating classification results visualization: {e}")
+            print(f"  [ERROR] Error generating classification results visualization: {e}")
     
-    print("\nPRIVACY BUDGET:")
-    print(f"  Target ε: {float(target_epsilon):.3f}")
-    print(f"  Final ε: {final_epsilon:.3f}")
+    print(f"\nPRIVACY BUDGET:")
+    print(f"  Target epsilon: {float(target_epsilon):.3f}")
+    print(f"  Final epsilon: {final_epsilon:.3f}")
     if dp_enabled:
         if final_epsilon <= float(target_epsilon):
-            print("  ✓ Budget maintained (within target)")
+            print("  [OK] Budget maintained (within target)")
         else:
             overshoot = final_epsilon - float(target_epsilon)
             pct = (overshoot / float(target_epsilon) * 100.0) if float(target_epsilon) > 0 else float('inf')
-            print(f"  ⚠️ Budget exceeded by {overshoot:.3f} ε ({pct:.1f}%)")
-    print(f"  Final δ: {final_delta:.2e}")
+            print(f"  [WARN] Budget exceeded by {overshoot:.3f} epsilon ({pct:.1f}%)")
+    print(f"  Final delta: {final_delta:.2e}")
     
     print("\nTRAINING TIME:")
     total_time = stage1_time + stage2_time + stage3_time
@@ -1614,7 +1614,7 @@ def final_evaluation(
         for k, v in summary.items():
             writer.writerow([k, v])
     
-    print(f"\n✓ Results saved to:")
+    print(f"\n[OK] Results saved to:")
     print(f"  - {model_path}")
     print(f"  - {history_csv}")
     print(f"  - {results_table_csv}")
@@ -1630,7 +1630,7 @@ def final_evaluation(
         if old_dir != new_dir and not new_dir.exists():
             try:
                 old_dir.rename(new_dir)
-                print(f"\n✓ Renamed checkpoint directory:")
+                print(f"\n[OK] Renamed checkpoint directory:")
                 print(f"  From: {old_dir}")
                 print(f"  To: {new_dir}")
                 # Update latest_run.txt
@@ -1664,9 +1664,9 @@ def final_evaluation(
             if os.path.exists(file_path):
                 try:
                     colab_files.download(file_path)
-                    print(f"  ✓ Downloaded: {file_path}")
+                    print(f"  [OK] Downloaded: {file_path}")
                 except Exception as e:
-                    print(f"  ✗ Error downloading {file_path}: {e}")
+                    print(f"  [ERROR] Error downloading {file_path}: {e}")
             else:
                 print(f"  - File not found: {file_path}")
     else:
@@ -1685,9 +1685,9 @@ def save_checkpoint(model, optimizer, epoch, loss, path):
     if IN_COLAB and colab_files is not None:
         try:
             colab_files.download(path)
-            print(f"  ✓ Checkpoint downloaded: {path}")
+            print(f"  [OK] Checkpoint downloaded: {path}")
         except Exception as e:
-            print(f"  ✗ Error downloading checkpoint: {e}")
+            print(f"  [ERROR] Error downloading checkpoint: {e}")
 
 def load_checkpoint(model, optimizer, path):
     # Use map_location to handle loading checkpoints saved on different devices

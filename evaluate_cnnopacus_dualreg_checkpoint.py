@@ -149,7 +149,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--checkpoint",
         default=(
-            "D:\\flight delay\\stpn paper\\STPN-main\\checkpoints\\cnnopacus_-_deepDualReg_-_kan_-_time_enable_stage3_cdata_sigma0_44_dualreg_model_eps7.31_20260129_042038\\cnnopacus_-_deepDualReg_-_kan_-_time_enable_stage3_cdata_sigma0_44_dualreg_model_eps7.31_20260129_042038.pth"
+            "checkpoints\\cnnopacus_-_deepDualReg_-_kan_cdata_sigma0_00_dualreg_model_eps0.00_20260128_012028"
+            "\\cnnopacus_-_deepDualReg_-_kan_cdata_sigma0_00_dualreg_model_eps0.00_20260128_012028.pth"
         ),
         type=str,
         help="Path to .pth checkpoint",

@@ -1,0 +1,15 @@
+COMMAND:
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\python.exe D:\flight delay\stpn paper\STPN-main\stacked_gru_transformer_three_stage.py --resume_checkpoint D:\flight delay\stpn paper\STPN-main\checkpoints\stacked_gru_three_stage_20260324_003536\checkpoint_stage1_epoch6.pt --checkpoint_dir D:\flight delay\stpn paper\STPN-main\sweeps\stage23_regressors_20260324_120559\regressor_graph_gat\checkpoints --start_stage 2 --regressor graph_gat --output_dir D:\flight delay\stpn paper\STPN-main\sweeps\stage23_regressors_20260324_120559\regressor_graph_gat
+
+
+================================================================================
+THREE-STAGE STACKED GRU + TRANSFORMER TRAINING
+================================================================================
+Device: cuda
+
+Node-level balance: 23.33% delayed 
+
+Node-level balance: 17.16% delayed 
+
+Node-level balance: 24.22% delayed 
+[DATA] train_samples=19197 | val_samples=2717 | test_samples=5464 | batch_size=128 | train_batches=149 | val_batches=22 | test_batches=43 | max_train_batches=0 | max_val_batches=0 | effective_train_steps/epoch=149

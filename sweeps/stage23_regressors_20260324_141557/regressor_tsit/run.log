@@ -1,0 +1,63 @@
+COMMAND:
+c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\python.exe -u D:\flight delay\stpn paper\STPN-main\stacked_gru_transformer_three_stage.py --resume_checkpoint D:\flight delay\stpn paper\STPN-main\checkpoints\stacked_gru_three_stage_20260324_003536\checkpoint_stage1_epoch6.pt --checkpoint_dir D:\flight delay\stpn paper\STPN-main\sweeps\stage23_regressors_20260324_141557\regressor_tsit\checkpoints --start_stage 2 --regressor tsit --output_dir D:\flight delay\stpn paper\STPN-main\sweeps\stage23_regressors_20260324_141557\regressor_tsit
+
+
+================================================================================
+THREE-STAGE STACKED GRU + TRANSFORMER TRAINING
+================================================================================
+Device: cuda
+
+Node-level balance: 23.33% delayed 
+
+Node-level balance: 17.16% delayed 
+
+Node-level balance: 24.22% delayed 
+[DATA] train_samples=19197 | val_samples=2717 | test_samples=5464 | batch_size=128 | train_batches=149 | val_batches=22 | test_batches=43 | max_train_batches=0 | max_val_batches=0 | effective_train_steps/epoch=149
+[DP] Enabled
+  target epsilon=7.5000, delta=1.0e-05
+  sample_rate=0.006668, total_steps=8940
+  noise_multiplier(sigma)=0.507862
+  approx epsilon upper bound=7.4977
+[PERF] AMP=on | cache_stage23_features=off | compile=off | fused_adamw=off
+[MODEL] classifier=TSiTPlus | regressor=tsit
+[RESUME] Loaded partial checkpoint state: stage=1, epoch=6, matched_tensors=163, skipped_tensors=20
+[RESUME] Reinitialized optimizer because checkpoint architecture does not fully match current model.
+[RESUME] Checkpoint metadata: stage=1, epoch=6
+[RESUME] Forcing start at stage=2 (skipping stages < 2).
+[CHECKPOINT] Saving to: D:\flight delay\stpn paper\STPN-main\sweeps\stage23_regressors_20260324_141557\regressor_tsit\checkpoints
+[RESUME] Stage 1 already complete; skipping.
+
+================================================================================
+STAGE 2: DELAYED REGRESSOR
+================================================================================
+Traceback (most recent call last):
+  File "D:\flight delay\stpn paper\STPN-main\stacked_gru_transformer_three_stage.py", line 2414, in <module>
+    main()
+  File "D:\flight delay\stpn paper\STPN-main\stacked_gru_transformer_three_stage.py", line 2295, in main
+    h2, t2 = train_stage2(
+             ^^^^^^^^^^^^^
+  File "D:\flight delay\stpn paper\STPN-main\stacked_gru_transformer_three_stage.py", line 1148, in train_stage2
+    feat_batch = model._extract_enriched_sequence(bx_dev, bei_adj, bei_od, bei_od_t).detach()
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\flight delay\stpn paper\STPN-main\stacked_gru_transformer_three_stage.py", line 621, in _extract_enriched_sequence
+    gru_seq = self.encoder(x_flat)
+              ^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\flight delay\stpn paper\STPN-main\stacked_gru_transformer.py", line 153, in forward
+    h, _ = self.gru(h)  # bidir concat â†’ (B, T, gru_dim)
+           ^^^^^^^^^^^
+  File "c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\Lenovo\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\rnn.py", line 1393, in forward
+    result = _VF.gru(
+             ^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 368.00 MiB. GPU 0 has a total capacity of 4.00 GiB of which 2.15 GiB is free. Of the allocated memory 732.80 MiB is allocated by PyTorch, and 339.20 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)

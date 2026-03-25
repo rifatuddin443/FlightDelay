@@ -370,6 +370,42 @@ def solve_noise_multiplier_for_epsilon(
     return float(hi)
 
 
+def _privacy_epsilon_for_steps(
+    *,
+    noise_multiplier: float,
+    sample_rate: float,
+    steps: int,
+    delta: float,
+) -> float:
+    return epsilon_upper_bound_approx(
+        noise_multiplier=noise_multiplier,
+        sample_rate=sample_rate,
+        steps=steps,
+        delta=delta,
+    )
+
+
+def _history_privacy_steps(
+    history: List[Dict],
+    *,
+    stage: int,
+    default_steps_per_epoch: int,
+) -> int:
+    total_steps = 0
+    for row in history:
+        if int(row.get("stage", stage)) != int(stage):
+            continue
+        steps = row.get("privacy_steps_in_epoch")
+        if steps is None:
+            steps = row.get("privacy_steps_epoch")
+        if steps is None:
+            steps = row.get("privacy_steps")
+        if steps is None:
+            steps = default_steps_per_epoch
+        total_steps += int(steps)
+    return int(total_steps)
+
+
 def _dp_noise_and_step(
     params: List[torch.nn.Parameter],
     optimizer: torch.optim.Optimizer,
@@ -766,6 +802,7 @@ def save_training_checkpoint(
     stage3_time: float,
     sigma: float,
     epsilon_final: float,
+    privacy_steps: int = 0,
     save_every: int = 1,
     is_best: bool = False,
     best_metric_name: str = "",
@@ -785,6 +822,7 @@ def save_training_checkpoint(
         "stage3_time": float(stage3_time),
         "sigma": float(sigma),
         "epsilon_final": float(epsilon_final),
+        "privacy_steps": int(privacy_steps),
         "is_best": bool(is_best),
         "best_metric_name": str(best_metric_name),
         "best_metric_value": float(best_metric_value),
@@ -873,11 +911,18 @@ def train_stage1(
     best_state = None
     edge_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = {}
     scaler = GradScaler(enabled=(use_amp and not dp_enabled))
+    completed_privacy_steps = _history_privacy_steps(
+        history,
+        stage=1,
+        default_steps_per_epoch=effective_train_steps,
+    )
+    running_privacy_steps = int(completed_privacy_steps)
 
     for epoch in range(start_epoch, epochs + 1):
         ep_t0 = time.time()
         model.train()
         train_losses: List[float] = []
+        epoch_privacy_steps = 0
 
         for bx, by_reg, by_cls in _iter_limited(train_loader, max_train_batches):
             bsz = bx.size(0)
@@ -920,6 +965,8 @@ def train_stage1(
                 loss = float(loss_t.item())
 
             train_losses.append(float(loss))
+            if dp_enabled:
+                epoch_privacy_steps += 1
 
         model.eval()
         val_probs, val_targets = [], []
@@ -958,6 +1005,17 @@ def train_stage1(
 
         ep_sec = time.time() - ep_t0
         train_loss = float(np.mean(train_losses)) if train_losses else 0.0
+        if dp_enabled:
+            running_privacy_steps += int(epoch_privacy_steps)
+            privacy_steps_total = int(privacy_steps_offset + running_privacy_steps)
+        else:
+            privacy_steps_total = 0
+        privacy_epsilon = _privacy_epsilon_for_steps(
+            noise_multiplier=noise_multiplier,
+            sample_rate=sample_rate,
+            steps=privacy_steps_total,
+            delta=target_delta,
+        ) if dp_enabled else 0.0
         history.append(
             {
                 "stage": 1,
@@ -969,17 +1027,19 @@ def train_stage1(
                 "val_accuracy": vm["accuracy"],
                 "is_best": int(is_best),
                 "epoch_time_seconds": ep_sec,
-                "epsilon_approx": epsilon_upper_bound_approx(
-                    noise_multiplier=noise_multiplier,
-                    sample_rate=sample_rate,
-                    steps=privacy_steps_offset + epoch * effective_train_steps,
-                    delta=target_delta,
-                ) if dp_enabled else 0.0,
+                "privacy_steps_in_epoch": int(epoch_privacy_steps),
+                "privacy_steps_total": int(privacy_steps_total),
+                "epsilon_approx": privacy_epsilon,
             }
         )
         print(
             f"Epoch {epoch}/{epochs} | loss={train_loss:.4f} | val_f1={vm['f1']:.4f} "
-            f"(arr={vm['f1_arrival']:.4f}, dep={vm['f1_departure']:.4f}) | sec={ep_sec:.1f}",
+            f"(arr={vm['f1_arrival']:.4f}, dep={vm['f1_departure']:.4f}) | sec={ep_sec:.1f}"
+            + (
+                f" | dp_steps={privacy_steps_total} | epsilon={privacy_epsilon:.4f}"
+                if dp_enabled
+                else ""
+            ),
             flush=True,
         )
 
@@ -1074,6 +1134,12 @@ def train_stage2(
     best_state = None
     edge_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = {}
     scaler_amp = GradScaler(enabled=(use_amp and not dp_enabled))
+    completed_privacy_steps = _history_privacy_steps(
+        history,
+        stage=2,
+        default_steps_per_epoch=effective_train_steps,
+    )
+    running_privacy_steps = int(completed_privacy_steps)
 
     feature_train_loader = None
     feature_val_loader = None
@@ -1115,6 +1181,7 @@ def train_stage2(
         model.train()
         tr_losses: List[float] = []
         tr_masks: List[float] = []
+        epoch_privacy_steps = 0
 
         if feature_train_loader is not None:
             iter_train = ((bf, by_reg, None) for bf, by_reg in feature_train_loader)
@@ -1212,6 +1279,9 @@ def train_stage2(
                 tr_losses.append(float(loss.item()))
                 tr_masks.append(_channel_stats(mask))
 
+            if dp_enabled:
+                epoch_privacy_steps += 1
+
         model.eval()
         va_losses: List[float] = []
         va_masks: List[float] = []
@@ -1265,6 +1335,17 @@ def train_stage2(
             is_best = True
 
         ep_sec = time.time() - ep_t0
+        if dp_enabled:
+            running_privacy_steps += int(epoch_privacy_steps)
+            privacy_steps_total = int(privacy_steps_offset + running_privacy_steps)
+        else:
+            privacy_steps_total = 0
+        privacy_epsilon = _privacy_epsilon_for_steps(
+            noise_multiplier=noise_multiplier,
+            sample_rate=sample_rate,
+            steps=privacy_steps_total,
+            delta=target_delta,
+        ) if dp_enabled else 0.0
         history.append(
             {
                 "stage": 2,
@@ -1275,17 +1356,19 @@ def train_stage2(
                 "val_mask_ratio": va_mask,
                 "is_best": int(is_best),
                 "epoch_time_seconds": ep_sec,
-                "epsilon_approx": epsilon_upper_bound_approx(
-                    noise_multiplier=noise_multiplier,
-                    sample_rate=sample_rate,
-                    steps=privacy_steps_offset + epoch * effective_train_steps,
-                    delta=target_delta,
-                ) if dp_enabled else 0.0,
+                "privacy_steps_in_epoch": int(epoch_privacy_steps),
+                "privacy_steps_total": int(privacy_steps_total),
+                "epsilon_approx": privacy_epsilon,
             }
         )
         print(
             f"Epoch {epoch}/{epochs} | train_loss={tr_loss:.4f} | val_loss={va_loss:.4f} | "
-            f"mask={tr_mask*100:.1f}% (val {va_mask*100:.1f}%) | sec={ep_sec:.1f}",
+            f"mask={tr_mask*100:.1f}% (val {va_mask*100:.1f}%) | sec={ep_sec:.1f}"
+            + (
+                f" | dp_steps={privacy_steps_total} | epsilon={privacy_epsilon:.4f}"
+                if dp_enabled
+                else ""
+            ),
             flush=True,
         )
 
@@ -1375,6 +1458,12 @@ def train_stage3(
     best_state = None
     edge_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = {}
     scaler_amp = GradScaler(enabled=(use_amp and not dp_enabled))
+    completed_privacy_steps = _history_privacy_steps(
+        history,
+        stage=3,
+        default_steps_per_epoch=effective_train_steps,
+    )
+    running_privacy_steps = int(completed_privacy_steps)
 
     feature_train_loader = None
     feature_val_loader = None
@@ -1416,6 +1505,7 @@ def train_stage3(
         model.train()
         tr_losses: List[float] = []
         tr_masks: List[float] = []
+        epoch_privacy_steps = 0
 
         if feature_train_loader is not None:
             iter_train = ((bf, by_reg, None) for bf, by_reg in feature_train_loader)
@@ -1522,6 +1612,9 @@ def train_stage3(
                 tr_losses.append(float(loss.item()))
                 tr_masks.append(_channel_stats(mask))
 
+            if dp_enabled:
+                epoch_privacy_steps += 1
+
         model.eval()
         va_losses: List[float] = []
         va_masks: List[float] = []
@@ -1581,6 +1674,17 @@ def train_stage3(
             is_best = True
 
         ep_sec = time.time() - ep_t0
+        if dp_enabled:
+            running_privacy_steps += int(epoch_privacy_steps)
+            privacy_steps_total = int(privacy_steps_offset + running_privacy_steps)
+        else:
+            privacy_steps_total = 0
+        privacy_epsilon = _privacy_epsilon_for_steps(
+            noise_multiplier=noise_multiplier,
+            sample_rate=sample_rate,
+            steps=privacy_steps_total,
+            delta=target_delta,
+        ) if dp_enabled else 0.0
         history.append(
             {
                 "stage": 3,
@@ -1591,17 +1695,19 @@ def train_stage3(
                 "val_mask_ratio": va_mask,
                 "is_best": int(is_best),
                 "epoch_time_seconds": ep_sec,
-                "epsilon_approx": epsilon_upper_bound_approx(
-                    noise_multiplier=noise_multiplier,
-                    sample_rate=sample_rate,
-                    steps=privacy_steps_offset + epoch * effective_train_steps,
-                    delta=target_delta,
-                ) if dp_enabled else 0.0,
+                "privacy_steps_in_epoch": int(epoch_privacy_steps),
+                "privacy_steps_total": int(privacy_steps_total),
+                "epsilon_approx": privacy_epsilon,
             }
         )
         print(
             f"Epoch {epoch}/{epochs} | train_loss={tr_loss:.4f} | val_loss={va_loss:.4f} | "
-            f"mask={tr_mask*100:.1f}% (val {va_mask*100:.1f}%) | sec={ep_sec:.1f}",
+            f"mask={tr_mask*100:.1f}% (val {va_mask*100:.1f}%) | sec={ep_sec:.1f}"
+            + (
+                f" | dp_steps={privacy_steps_total} | epsilon={privacy_epsilon:.4f}"
+                if dp_enabled
+                else ""
+            ),
             flush=True,
         )
 
@@ -1640,6 +1746,7 @@ def final_evaluation(
     dp_enabled: bool,
     epsilon_target: float,
     epsilon_approx_final: float,
+    privacy_steps_final: int,
     delta: float,
     noise_multiplier: float,
     max_grad_norm: float,
@@ -1724,6 +1831,8 @@ def final_evaluation(
     print(f"Regression delayed>thr: MAE={mae_delayed:.4f}, RMSE={rmse_delayed:.4f}")
     print(f"Regression non-delayed: MAE={mae_nd:.4f}, RMSE={rmse_nd:.4f}")
     print(f"Regression overall: MAE={mae_all:.4f}, RMSE={rmse_all:.4f}")
+    if dp_enabled:
+        print(f"Privacy: steps={privacy_steps_final} | target_epsilon={epsilon_target:.4f} | epsilon={epsilon_approx_final:.4f} | delta={delta:.1e}")
 
     model_path = os.path.join(out_dir, "stacked_gru_three_stage_best.pth")
     torch.save(model.state_dict(), model_path)
@@ -1754,6 +1863,7 @@ def final_evaluation(
         w.writerow(["stage3_time_seconds", f"{stage3_time:.2f}"])
         w.writerow(["total_time_seconds", f"{(stage1_time + stage2_time + stage3_time):.2f}"])
         w.writerow(["dp_enabled", int(dp_enabled)])
+        w.writerow(["privacy_steps_total", int(privacy_steps_final)])
         w.writerow(["epsilon_target", f"{epsilon_target:.6f}"])
         w.writerow(["epsilon_approx_final", f"{epsilon_approx_final:.6f}"])
         w.writerow(["delta", f"{delta:.12f}"])
@@ -1816,14 +1926,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dropout", type=float, default=0.15)
     p.add_argument("--chunk_size", type=int, default=200)
 
-    p.add_argument("--stage1_epochs", type=int, default=20)
-    p.add_argument("--stage2_epochs", type=int, default=20)
-    p.add_argument("--stage3_epochs", type=int, default=20)
+    p.add_argument("--stage1_epochs", type=int, default=15)
+    p.add_argument("--stage2_epochs", type=int, default=15)
+    p.add_argument("--stage3_epochs", type=int, default=15)
     p.add_argument("--batch_size", type=int, default=128)
     p.add_argument("--lr", type=float, default=5e-4)
-    p.add_argument("--stage1_lr", type=float, default=None)
-    p.add_argument("--stage2_lr", type=float, default=None)
-    p.add_argument("--stage3_lr", type=float, default=None)
+    p.add_argument("--stage1_lr", type=float, default=1e-4)
+    p.add_argument("--stage2_lr", type=float, default=7e-4)
+    p.add_argument("--stage3_lr", type=float, default=7e-4)
     p.add_argument("--patience", type=int, default=6)
 
     p.add_argument("--dp", action="store_true", default=True, help="Enable manual DP-SGD for stage training")
@@ -2254,9 +2364,23 @@ def main() -> None:
         os.makedirs(checkpoint_dir, exist_ok=True)
         print(f"[CHECKPOINT] Saving to: {checkpoint_dir}")
 
+    def _current_privacy_steps() -> int:
+        return (
+            _history_privacy_steps(history_state["h1"], stage=1, default_steps_per_epoch=effective_train_steps)
+            + _history_privacy_steps(history_state["h2"], stage=2, default_steps_per_epoch=effective_train_steps)
+            + _history_privacy_steps(history_state["h3"], stage=3, default_steps_per_epoch=effective_train_steps)
+        )
+
     def _write_checkpoint(stage: int, epoch: int, *, is_best: bool = False, best_metric_name: str = "", best_metric_value: float = 0.0) -> None:
         if not checkpoint_dir:
             return
+        current_privacy_steps = _current_privacy_steps() if args.dp else 0
+        current_epsilon = _privacy_epsilon_for_steps(
+            noise_multiplier=sigma,
+            sample_rate=sample_rate,
+            steps=current_privacy_steps,
+            delta=args.delta,
+        ) if args.dp else 0.0
         save_training_checkpoint(
             checkpoint_dir=checkpoint_dir,
             stage=stage,
@@ -2270,7 +2394,8 @@ def main() -> None:
             stage2_time=history_state["t2"],
             stage3_time=history_state["t3"],
             sigma=sigma,
-            epsilon_final=epsilon_final,
+            epsilon_final=current_epsilon,
+            privacy_steps=current_privacy_steps,
             save_every=int(args.checkpoint_every),
             is_best=bool(is_best),
             best_metric_name=str(best_metric_name),
@@ -2335,6 +2460,10 @@ def main() -> None:
         )
         history_state["h1"], history_state["t1"] = h1, t1
 
+    completed_s1_privacy_steps = _history_privacy_steps(history_state["h1"], stage=1, default_steps_per_epoch=effective_train_steps)
+    if completed_s1_privacy_steps == 0 and loaded_stage == 1:
+        completed_s1_privacy_steps = int(loaded_epoch) * int(effective_train_steps)
+
     stage2_done = (resume_stage > 2) or (resume_stage == 2 and resume_epoch >= args.stage2_epochs)
     if stage2_done:
         h2, t2 = history_state["h2"], history_state["t2"]
@@ -2373,7 +2502,7 @@ def main() -> None:
             args.max_grad_norm,
             args.delta,
             sample_rate,
-            int(completed_s1_epochs) * steps_per_stage,
+            int(completed_s1_privacy_steps),
             use_amp,
             cache_stage23_features,
             worker_count,
@@ -2386,6 +2515,10 @@ def main() -> None:
             checkpoint_callback=_s2_ckpt,
         )
         history_state["h2"], history_state["t2"] = h2, t2
+
+    completed_s2_privacy_steps = _history_privacy_steps(history_state["h2"], stage=2, default_steps_per_epoch=effective_train_steps)
+    if completed_s2_privacy_steps == 0 and loaded_stage == 2:
+        completed_s2_privacy_steps = int(loaded_epoch) * int(effective_train_steps)
 
     stage3_done = (resume_stage > 3) or (resume_stage == 3 and resume_epoch >= args.stage3_epochs)
     if stage3_done:
@@ -2425,7 +2558,7 @@ def main() -> None:
             args.max_grad_norm,
             args.delta,
             sample_rate,
-            (int(completed_s1_epochs) + int(completed_s2_epochs)) * steps_per_stage,
+            int(completed_s1_privacy_steps) + int(completed_s2_privacy_steps),
             use_amp,
             cache_stage23_features,
             worker_count,
@@ -2438,6 +2571,18 @@ def main() -> None:
             checkpoint_callback=_s3_ckpt,
         )
         history_state["h3"], history_state["t3"] = h3, t3
+
+    completed_s3_privacy_steps = _history_privacy_steps(history_state["h3"], stage=3, default_steps_per_epoch=effective_train_steps)
+    if completed_s3_privacy_steps == 0 and loaded_stage == 3:
+        completed_s3_privacy_steps = int(loaded_epoch) * int(effective_train_steps)
+
+    final_privacy_steps = int(completed_s1_privacy_steps + completed_s2_privacy_steps + completed_s3_privacy_steps)
+    epsilon_final_actual = _privacy_epsilon_for_steps(
+        noise_multiplier=sigma,
+        sample_rate=sample_rate,
+        steps=final_privacy_steps,
+        delta=args.delta,
+    ) if args.dp else 0.0
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = args.output_dir if args.output_dir != "auto" else f"stacked_gru_three_stage_{ts}"
@@ -2461,7 +2606,8 @@ def main() -> None:
         t3,
         args.dp,
         float(args.epsilon),
-        float(epsilon_final),
+        float(epsilon_final_actual),
+        int(final_privacy_steps),
         float(args.delta),
         float(sigma),
         float(args.max_grad_norm),

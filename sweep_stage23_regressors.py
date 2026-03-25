@@ -35,8 +35,8 @@ DEFAULT_REGRESSORS: Tuple[str, ...] = (
     # "gru",
     # "tsit",
     # "convtran",
-    # "nbeats",
-    "node_transformer",
+    "nbeats",
+    # "node_transformer",
     # "tft",
     # "graph_gat",
 )

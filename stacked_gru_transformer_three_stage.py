@@ -1737,6 +1737,7 @@ def final_evaluation(
     device: torch.device,
     scaler,
     class_threshold: float,
+    gating_k: float,
     delay_threshold: float,
     out_dir: str,
     history: List[Dict],
@@ -1792,8 +1793,12 @@ def final_evaluation(
     pred_nondelayed_np = torch.cat(reg_preds_nondelayed).numpy()
     reg_targets_np = torch.cat(reg_targets).numpy()
 
-    route_mask = cls_probs_np >= class_threshold
-    reg_pred_np = np.where(route_mask, pred_delayed_np, pred_nondelayed_np)
+    # Soft gating blend
+    weight = 1.0 / (1.0 + np.exp(-gating_k * (cls_probs_np - class_threshold)))
+    if weight.ndim < pred_delayed_np.ndim:
+        weight = np.expand_dims(weight, axis=-1)  # broadcast over output features only if dimensions mismatch
+    reg_pred_np = weight * pred_delayed_np + (1.0 - weight) * pred_nondelayed_np
+    reg_pred_np = np.maximum(0.0, reg_pred_np) # truncate negatives
 
     if scaler is not None and hasattr(scaler, "inverse_transform"):
         preds_2d = reg_pred_np.reshape(-1, reg_pred_np.shape[-1])
@@ -1824,13 +1829,37 @@ def final_evaluation(
     mae_nd, rmse_nd = _mae_rmse(tar_flat[nondelayed_mask], pred_flat[nondelayed_mask])
     mae_all, rmse_all = _mae_rmse(tar_flat, pred_flat)
 
+    preds_arr = preds_denorm[..., 0].reshape(-1) if preds_denorm.shape[-1] >= 2 else pred_flat
+    tars_arr = tars_denorm[..., 0].reshape(-1) if tars_denorm.shape[-1] >= 2 else tar_flat
+    preds_dep = preds_denorm[..., 1].reshape(-1) if preds_denorm.shape[-1] >= 2 else pred_flat
+    tars_dep = tars_denorm[..., 1].reshape(-1) if tars_denorm.shape[-1] >= 2 else tar_flat
+
+    del_mask_arr = tars_arr > delay_threshold
+    ndel_mask_arr = ~del_mask_arr
+    del_mask_dep = tars_dep > delay_threshold
+    ndel_mask_dep = ~del_mask_dep
+
+    mae_del_arr, rmse_del_arr = _mae_rmse(tars_arr[del_mask_arr], preds_arr[del_mask_arr])
+    mae_nd_arr, rmse_nd_arr = _mae_rmse(tars_arr[ndel_mask_arr], preds_arr[ndel_mask_arr])
+    mae_del_dep, rmse_del_dep = _mae_rmse(tars_dep[del_mask_dep], preds_dep[del_mask_dep])
+    mae_nd_dep, rmse_nd_dep = _mae_rmse(tars_dep[ndel_mask_dep], preds_dep[ndel_mask_dep])
+
+    mae_arr, rmse_arr = _mae_rmse(tars_arr, preds_arr)
+    mae_dep, rmse_dep = _mae_rmse(tars_dep, preds_dep)
+
     print("\n" + "=" * 80)
     print("FINAL EVALUATION")
     print("=" * 80)
     print(f"Classification F1: {test_cls['f1']:.4f} (arr={test_cls['f1_arrival']:.4f}, dep={test_cls['f1_departure']:.4f})")
     print(f"Regression delayed>thr: MAE={mae_delayed:.4f}, RMSE={rmse_delayed:.4f}")
+    print(f"  --> Arrival delayed : MAE={mae_del_arr:.4f}, RMSE={rmse_del_arr:.4f}")
+    print(f"  --> Departure delayed : MAE={mae_del_dep:.4f}, RMSE={rmse_del_dep:.4f}")
     print(f"Regression non-delayed: MAE={mae_nd:.4f}, RMSE={rmse_nd:.4f}")
+    print(f"  --> Arrival non-delayed: MAE={mae_nd_arr:.4f}, RMSE={rmse_nd_arr:.4f}")
+    print(f"  --> Departure non-delayed: MAE={mae_nd_dep:.4f}, RMSE={rmse_nd_dep:.4f}")
     print(f"Regression overall: MAE={mae_all:.4f}, RMSE={rmse_all:.4f}")
+    print(f"  --> Arrival overall   : MAE={mae_arr:.4f}, RMSE={rmse_arr:.4f}")
+    print(f"  --> Departure overall : MAE={mae_dep:.4f}, RMSE={rmse_dep:.4f}")
     if dp_enabled:
         print(f"Privacy: steps={privacy_steps_final} | target_epsilon={epsilon_target:.4f} | epsilon={epsilon_approx_final:.4f} | delta={delta:.1e}")
 
@@ -1854,10 +1883,22 @@ def final_evaluation(
         w.writerow(["classification_f1_departure", f"{test_cls['f1_departure']:.6f}"])
         w.writerow(["regression_mae_delayed", f"{mae_delayed:.6f}"])
         w.writerow(["regression_rmse_delayed", f"{rmse_delayed:.6f}"])
+        w.writerow(["regression_mae_delayed_arrival", f"{mae_del_arr:.6f}"])
+        w.writerow(["regression_rmse_delayed_arrival", f"{rmse_del_arr:.6f}"])
+        w.writerow(["regression_mae_delayed_departure", f"{mae_del_dep:.6f}"])
+        w.writerow(["regression_rmse_delayed_departure", f"{rmse_del_dep:.6f}"])
         w.writerow(["regression_mae_nondelayed", f"{mae_nd:.6f}"])
         w.writerow(["regression_rmse_nondelayed", f"{rmse_nd:.6f}"])
+        w.writerow(["regression_mae_nondelayed_arrival", f"{mae_nd_arr:.6f}"])
+        w.writerow(["regression_rmse_nondelayed_arrival", f"{rmse_nd_arr:.6f}"])
+        w.writerow(["regression_mae_nondelayed_departure", f"{mae_nd_dep:.6f}"])
+        w.writerow(["regression_rmse_nondelayed_departure", f"{rmse_nd_dep:.6f}"])
         w.writerow(["regression_mae_overall", f"{mae_all:.6f}"])
         w.writerow(["regression_rmse_overall", f"{rmse_all:.6f}"])
+        w.writerow(["regression_mae_overall_arrival", f"{mae_arr:.6f}"])
+        w.writerow(["regression_rmse_overall_arrival", f"{rmse_arr:.6f}"])
+        w.writerow(["regression_mae_overall_departure", f"{mae_dep:.6f}"])
+        w.writerow(["regression_rmse_overall_departure", f"{rmse_dep:.6f}"])
         w.writerow(["stage1_time_seconds", f"{stage1_time:.2f}"])
         w.writerow(["stage2_time_seconds", f"{stage2_time:.2f}"])
         w.writerow(["stage3_time_seconds", f"{stage3_time:.2f}"])
@@ -1898,6 +1939,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--horizons", type=int, nargs=1, default=[12], choices=[3, 6, 12, 24])
     p.add_argument("--delay_threshold", type=float, default=5.0)
     p.add_argument("--class_threshold", type=float, default=0.5)
+    p.add_argument("--gating_k", type=float, default=5.0, help="Gating steepness for soft gating")
 
     p.add_argument("--gru_dim", type=int, default=64)
     p.add_argument("--gru_layers", type=int, default=2)
@@ -1908,7 +1950,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--regressor",
         type=str,
-        default="deep_mlp",
+        default="nbeats",
         choices=[
             # "mlp",
             "deep_mlp",
@@ -1926,18 +1968,18 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dropout", type=float, default=0.15)
     p.add_argument("--chunk_size", type=int, default=200)
 
-    p.add_argument("--stage1_epochs", type=int, default=15)
-    p.add_argument("--stage2_epochs", type=int, default=15)
-    p.add_argument("--stage3_epochs", type=int, default=15)
+    p.add_argument("--stage1_epochs", type=int, default=20)
+    p.add_argument("--stage2_epochs", type=int, default=20)
+    p.add_argument("--stage3_epochs", type=int, default=20)
     p.add_argument("--batch_size", type=int, default=128)
     p.add_argument("--lr", type=float, default=5e-4)
     p.add_argument("--stage1_lr", type=float, default=1e-4)
-    p.add_argument("--stage2_lr", type=float, default=7e-4)
-    p.add_argument("--stage3_lr", type=float, default=7e-4)
+    p.add_argument("--stage2_lr", type=float, default=1e-4)
+    p.add_argument("--stage3_lr", type=float, default=1e-4)
     p.add_argument("--patience", type=int, default=6)
 
     p.add_argument("--dp", action="store_true", default=True, help="Enable manual DP-SGD for stage training")
-    p.add_argument("--epsilon", type=float, default=7.5)
+    p.add_argument("--epsilon", type=float, default=15)
     p.add_argument("--delta", type=float, default=1e-5)
     p.add_argument("--max_grad_norm", type=float, default=1.0)
     p.add_argument(
@@ -1978,7 +2020,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--resume_checkpoint",
         type=str,
-        default="",
+        # default="D:\\flight delay\\stpn paper\\STPN-main\\checkpoints\\stacked_gru_three_stage_20260412_002258\\checkpoint_stage3_epoch3.pt",
         help=(
             "Path to a saved checkpoint .pt file OR a directory containing checkpoints to resume training. "
             "If a directory is provided, the script will try best_stage{start_stage}.pt then latest_checkpoint.pt."
@@ -1998,6 +2040,12 @@ def parse_args() -> argparse.Namespace:
         default=1,
         choices=[1, 2, 3],
         help="Force starting from this stage (skips earlier stages even if incomplete). Useful with --resume_checkpoint.",
+    )
+    p.add_argument(
+        "--eval_only_model",
+        type=str,
+        default="",
+        help="Path to a single model file to load. Will skip all training and only run `final_evaluation`.",
     )
     return p.parse_args()
 
@@ -2056,6 +2104,18 @@ def _resolve_resume_checkpoint(path_or_dir: str, *, start_stage: int) -> str:
 def main() -> None:
     args = parse_args()
     set_seed(args.seed)
+
+    is_colab = False
+    try:
+        import google.colab
+        is_colab = True
+    except ImportError:
+        pass
+
+    if is_colab:
+        # from google.colab import drive
+        # drive.mount('/content/drive')
+        print("[COLAB] Running in Google Colab, default paths adjusted to Drive.")
 
     device = (
         torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -2355,7 +2415,10 @@ def main() -> None:
             checkpoint_dir = os.path.dirname(os.path.abspath(resume_checkpoint_path))
         else:
             ckpt_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            checkpoint_dir = os.path.join(os.getcwd(), "checkpoints", f"stacked_gru_three_stage_{ckpt_ts}")
+            if is_colab:
+                checkpoint_dir = f"/content/drive/MyDrive/stpn_ckpts/stacked_gru_three_stage_{ckpt_ts}"
+            else:
+                checkpoint_dir = os.path.join(os.getcwd(), "checkpoints", f"stacked_gru_three_stage_{ckpt_ts}")
     else:
         checkpoint_dir = checkpoint_dir_arg
 
@@ -2409,6 +2472,48 @@ def main() -> None:
     ei_adj = edge_index_adj.to(device)
     ei_od = edge_index_od.to(device)
     ei_od_t = edge_index_od_t.to(device)
+
+    if getattr(args, "eval_only_model", ""):
+        print(f"[EVAL ONLY] Loading model from: {args.eval_only_model}")
+        ckpt = load_training_checkpoint(args.eval_only_model, device)
+        state_dict = ckpt.get("model_state", ckpt) if isinstance(ckpt, dict) else ckpt
+        compat_loaded, skipped = _load_compatible_model_state(model, state_dict)
+        print(f"Loaded {compat_loaded} parameters, skipped {skipped}.")
+        
+        base_dir = os.path.dirname(args.eval_only_model) or "."
+        model_name = os.path.basename(args.eval_only_model)
+        out_dir = os.path.join(base_dir, f"eval_results_{model_name}")
+        os.makedirs(out_dir, exist_ok=True)
+
+        final_evaluation(
+            model,
+            test_loader,
+            ei_adj,
+            ei_od,
+            ei_od_t,
+            n_nodes,
+            device,
+            scaler,
+            args.class_threshold,
+            args.gating_k,
+            args.delay_threshold,
+            out_dir,
+            [],
+            0.0,
+            0.0,
+            0.0,
+            args.dp,
+            args.epsilon,
+            0.0,
+            0,
+            args.delta,
+            sigma,
+            args.max_grad_norm,
+            use_amp,
+            args.max_test_batches,
+            vars(args)
+        )
+        return
 
     stage1_done = (resume_stage > 1) or (resume_stage == 1 and resume_epoch >= args.stage1_epochs)
     if stage1_done:
@@ -2585,7 +2690,13 @@ def main() -> None:
     ) if args.dp else 0.0
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = args.output_dir if args.output_dir != "auto" else f"stacked_gru_three_stage_{ts}"
+    if args.output_dir != "auto":
+        out_dir = args.output_dir
+    else:
+        if is_colab:
+            out_dir = f"/content/drive/MyDrive/stpn_results/stacked_gru_three_stage_{ts}"
+        else:
+            out_dir = f"stacked_gru_three_stage_{ts}"
     os.makedirs(out_dir, exist_ok=True)
 
     final_evaluation(
@@ -2598,6 +2709,7 @@ def main() -> None:
         device,
         scaler,
         args.class_threshold,
+        args.gating_k,
         args.delay_threshold,
         out_dir,
         h1 + h2 + h3,
